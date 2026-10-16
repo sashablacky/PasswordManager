@@ -7,6 +7,8 @@
  * Pairing: a fresh P-256 key pair per attempt; ECDH with the program's key
  * gives a shared secret, from which come the six-digit code shown on both
  * sides and the key that unwraps the pairing key sent by the program.
+ * Unlocking: the master password typed into the popup is encrypted with a
+ * key from a fresh ECDH exchange plus the unlock key received at pairing.
  * Sessions: HKDF-SHA256 of the pairing key with both nonces gives one
  * AES-256-GCM key per direction; the sequence number is part of the
  * authenticated data.
@@ -75,6 +77,20 @@ const SVCrypto = (() => {
     return new Uint8Array(plain);
   }
 
+  // ------------------------------------------------------------ unlocking
+
+  async function sealUnlock(unlockKey, secret, serverNonce, clientId, challengeId, password) {
+    const ikm = new Uint8Array(unlockKey.length + secret.length);
+    ikm.set(unlockKey, 0);
+    ikm.set(secret, unlockKey.length);
+    const key = await aesKey(await hkdf(ikm, "securevault-unlock", serverNonce), "encrypt");
+    const iv = randomBytes(12);
+    const ct = await subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: enc.encode(`securevault-unlock|${clientId}|${challengeId}`) },
+      key, enc.encode(JSON.stringify({ password })));
+    return { iv: b64e(iv), ct: b64e(new Uint8Array(ct)) };
+  }
+
   // ------------------------------------------------------------ sessions
 
   // Returns plain data (base64 keys), so it can be kept in storage.session
@@ -111,7 +127,7 @@ const SVCrypto = (() => {
   }
 
   return { b64e, b64d, randomBytes, newKeyPair, sharedSecret, pairingCode, unwrapPairingKey,
-           newSession, seal, unseal };
+           sealUnlock, newSession, seal, unseal };
 })();
 
 if (typeof module !== "undefined") module.exports = SVCrypto;

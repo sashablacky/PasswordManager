@@ -130,5 +130,17 @@
   },
   "saveBarFailed": {
     "message": "Не удалось сохранить. SecureVault разблокирован?"
+  },
+  "masterPassword": {
+    "message": "Мастер-пароль"
+  },
+  "unlock": {
+    "message": "Разблокировать"
+  },
+  "unlockText": {
+    "message": "Введите мастер-пароль, чтобы разблокировать SecureVault."
+  },
+  "unlockFailed": {
+    "message": "Не удалось разблокировать."
   }
 }

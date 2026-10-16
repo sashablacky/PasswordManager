@@ -6,9 +6,11 @@ transport (integration.server) and the user interface (the pairing question,
 notifications) are plugged in from outside, so this module can be tested on
 its own.
 
-Without a session only harmless requests are answered: whether the vault is
+Without a session only these requests are answered: whether the vault is
 locked, a pairing request (only while it is unlocked, and only with the user's
-consent in the program) and "bring the program to the front". Everything that
+consent in the program), "bring the program to the front", and unlocking with
+the master password (only from a paired browser, encrypted, and with the same
+limit on failed attempts as the login window). Everything that
 touches entries needs an encrypted session of a paired browser, and a reply
 never contains more than the entries of the site the browser is on.
 """
@@ -18,7 +20,7 @@ import os
 import secrets
 import time
 import uuid
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 from integration import protocol
 from integration.protocol import ProtocolError, b64d, b64e
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 PAIRING_TIMEOUT_SECONDS = 180
 SESSION_IDLE_SECONDS = 8 * 3600
 MAX_SESSIONS = 32
+UNLOCK_CHALLENGE_SECONDS = 300
+MAX_UNLOCK_CHALLENGES = 8
 
 MAX_FIELD_LENGTH = 4096
 GENERATED_LENGTH = 20
@@ -45,6 +49,10 @@ class BridgeUI:
     def show_app(self) -> None:
         pass
 
+    def unlock(self, master_password: str) -> Tuple[bool, str]:
+        """Unlock the vault with the master password typed into the extension"""
+        return False, "Unlocking from the browser is not available"
+
     def entries_changed(self, message: str) -> None:
         pass
 
@@ -59,6 +67,15 @@ class _Pairing:
         self.secret = secret
         self.state = "pending"  # pending, approved, rejected
         self.pairing_key: Optional[bytes] = None
+        self.unlock_key: Optional[bytes] = None
+        self.created = time.monotonic()
+
+
+class _UnlockChallenge:
+    def __init__(self, client_id: str):
+        self.client_id = client_id
+        self.private_key = protocol.generate_keypair()
+        self.nonce = os.urandom(protocol.NONCE_SIZE)
         self.created = time.monotonic()
 
 
@@ -78,6 +95,7 @@ class BridgeService:
         self.store = BrowserClientStore(app.db, app.encryption)
         self._sessions: Dict[str, _Session] = {}
         self._pairings: Dict[str, _Pairing] = {}
+        self._unlocks: Dict[str, _UnlockChallenge] = {}
 
     # ------------------------------------------------------------ state
 
@@ -90,6 +108,7 @@ class BridgeService:
         """Forget every session and pending pairing (the vault was locked)"""
         self._sessions.clear()
         self._pairings.clear()
+        self._unlocks.clear()
 
     def forget_client(self, client_id: str) -> None:
         for sid in [sid for sid, s in self._sessions.items() if s.client_id == client_id]:
@@ -101,6 +120,8 @@ class BridgeService:
             del self._sessions[sid]
         for pid in [pid for pid, p in self._pairings.items() if now - p.created > PAIRING_TIMEOUT_SECONDS]:
             del self._pairings[pid]
+        for uid in [uid for uid, u in self._unlocks.items() if now - u.created > UNLOCK_CHALLENGE_SECONDS]:
+            del self._unlocks[uid]
 
     # ------------------------------------------------------------ entry point
 
@@ -116,6 +137,8 @@ class BridgeService:
                 return self._pair_request(message)
             if kind == "pair_status":
                 return self._pair_status(message)
+            if kind == "unlock":
+                return self._unlock(message)
             if kind == "show_app":
                 self.ui.show_app()
                 return {"type": "ok"}
@@ -132,11 +155,14 @@ class BridgeService:
     def _hello(self, message: dict) -> dict:
         reply = {"type": "hello", "app": protocol.APP_ID, "version": protocol.PROTOCOL_VERSION}
         user_id = self._user_id()
+        client_id = message.get("client_id")
         if user_id is None:
             reply["state"] = "locked"
+            challenge = self._new_unlock_challenge(client_id)
+            if challenge:
+                reply["unlock"] = challenge
             return reply
 
-        client_id = message.get("client_id")
         pairing_key = self.store.get_key(user_id, client_id) if client_id else None
         if pairing_key is None:
             reply["state"] = "unpaired"
@@ -154,6 +180,39 @@ class BridgeService:
         self.store.touch(client_id)
 
         reply.update(state="ready", session=session_id, nonce=b64e(server_nonce))
+        return reply
+
+    def _new_unlock_challenge(self, client_id) -> Optional[dict]:
+        """A fresh key for sending the master password, offered only to paired browsers"""
+        if self.store.get_unlock_key(client_id) is None:
+            return None
+        if len(self._unlocks) >= MAX_UNLOCK_CHALLENGES:
+            oldest = min(self._unlocks, key=lambda uid: self._unlocks[uid].created)
+            del self._unlocks[oldest]
+        challenge_id = secrets.token_urlsafe(16)
+        challenge = _UnlockChallenge(client_id)
+        self._unlocks[challenge_id] = challenge
+        return {"id": challenge_id, "pub": b64e(protocol.public_bytes(challenge.private_key)),
+                "nonce": b64e(challenge.nonce)}
+
+    def _unlock(self, message: dict) -> dict:
+        challenge_id = message.get("id")
+        challenge = self._unlocks.pop(challenge_id, None) if isinstance(challenge_id, str) else None
+        client_id = message.get("client_id")
+        if challenge is None or challenge.client_id != client_id:
+            return _error("unlock_expired")
+        unlock_key = self.store.get_unlock_key(client_id)
+        if unlock_key is None:
+            return _error("unpaired")
+        secret = protocol.shared_secret(challenge.private_key, b64d(message.get("pub"), 65))
+        password = protocol.open_unlock(unlock_key, secret, challenge.nonce, client_id, challenge_id,
+                                        message.get("iv"), message.get("ct"))
+        if self._user_id() is not None:
+            return {"type": "unlock_result", "ok": True}
+        ok, text = self.ui.unlock(password)
+        reply = {"type": "unlock_result", "ok": bool(ok)}
+        if not ok:
+            reply["message"] = text
         return reply
 
     def _pair_request(self, message: dict) -> dict:
@@ -184,7 +243,8 @@ class BridgeService:
                 return
             if allowed and self._user_id() == uid:
                 current.pairing_key = os.urandom(protocol.KEY_SIZE)
-                self.store.add(uid, current.client_id, current.browser, current.pairing_key)
+                current.unlock_key = os.urandom(protocol.KEY_SIZE)
+                self.store.add(uid, current.client_id, current.browser, current.pairing_key, current.unlock_key)
                 self.forget_client(current.client_id)
                 current.state = "approved"
                 logger.warning(f"Browser paired: {current.browser}")
@@ -205,7 +265,9 @@ class BridgeService:
         del self._pairings[pairing_id]
         if pairing.state == "rejected":
             return {"type": "pair_status", "state": "rejected"}
-        iv, ct = protocol.wrap_pairing_key(pairing.secret, pairing.client_id, pairing.pairing_key)
+        # The extension gets both keys at once: the pairing key, then the unlock key
+        iv, ct = protocol.wrap_pairing_key(pairing.secret, pairing.client_id,
+                                           pairing.pairing_key + pairing.unlock_key)
         return {"type": "pair_status", "state": "approved", "iv": iv, "ct": ct}
 
     # ------------------------------------------------------------ encrypted

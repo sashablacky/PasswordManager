@@ -130,5 +130,17 @@
   },
   "saveBarFailed": {
     "message": "Could not save. Is SecureVault unlocked?"
+  },
+  "masterPassword": {
+    "message": "Master password"
+  },
+  "unlock": {
+    "message": "Unlock"
+  },
+  "unlockText": {
+    "message": "Enter your master password to unlock SecureVault."
+  },
+  "unlockFailed": {
+    "message": "Could not unlock."
   }
 }

@@ -30,3 +30,8 @@ button.wide { width: 100%; }
 .generated { font-family: ui-monospace, Consolas, monospace; background: var(--panel); border-radius: 8px;
              padding: 8px; word-break: break-all; margin-top: 8px; user-select: all; }
 .error { color: var(--bad); }
+input[type=password] { width: 100%; font: inherit; color: var(--text); background: var(--panel);
+                      border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; outline: none; }
+input[type=password]:focus { border-color: var(--accent); }
+a { color: var(--accent2); }
+.small { font-size: 12px; margin-top: 10px; }

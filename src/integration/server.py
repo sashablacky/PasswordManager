@@ -162,6 +162,9 @@ class AppBridgeUI(BridgeUI):
         window.raise_()
         window.activateWindow()
 
+    def unlock(self, master_password):
+        return self.app.unlock_from_browser(master_password)
+
     def entries_changed(self, message):
         window = self.app.main_window
         if window is not None:

@@ -11,7 +11,7 @@ import subprocess
 import pytest
 
 from integration.service import BridgeService
-from test_browser_bridge import RecordingUI, add_entry, app, endpoint_name  # noqa: F401 (fixtures)
+from test_browser_bridge import MASTER, RecordingUI, add_entry, app, endpoint_name  # noqa: F401 (fixtures)
 
 NODE = shutil.which("node")
 SCRIPT = os.path.join(os.path.dirname(__file__), "js", "client_flow.js")
@@ -23,13 +23,30 @@ class ApprovingUI(RecordingUI):
         on_answer(True)
 
 
+class LockableService(BridgeService):
+    """Understands one extra message, so the Node scripts can lock the vault"""
+
+    def handle(self, message):
+        if message.get("type") == "test_lock":
+            self.app.auth_manager.logout()
+            self.clear_sessions()
+            return {"type": "ok"}
+        return super().handle(message)
+
+
+def approving_ui(app):  # noqa: F811
+    ui = ApprovingUI()
+    ui.app = app
+    return ui
+
+
 @pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
 def test_extension_crypto_works_with_the_program(app):  # noqa: F811
     add_entry(app, "Example", "https://example.com", "alice")
-    ui = ApprovingUI()
-    service = BridgeService(app, ui)
+    ui = approving_ui(app)
+    service = LockableService(app, ui)
 
-    process = subprocess.Popen([NODE, SCRIPT], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    process = subprocess.Popen([NODE, SCRIPT, MASTER], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     try:
         while True:
             line = process.stdout.readline()
@@ -47,6 +64,9 @@ def test_extension_crypto_works_with_the_program(app):  # noqa: F811
     assert message["code"] == ui.questions[0][1]
     assert message["results"][0] == {"ok": True}
     assert message["results"][1]["logins"][0]["username"] == "alice"
+    assert message["lockedState"] == "locked"
+    assert message["unlocked"] == {"type": "unlock_result", "ok": True}
+    assert app.auth_manager.is_logged_in()
 
 
 @pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
@@ -57,12 +77,12 @@ def test_background_script_through_native_host(qtbot, app, endpoint_name):  # no
     from test_browser_bridge import HOST_SCRIPT
 
     add_entry(app, "Example", "https://example.com", "alice", "Alice-Pass-1")
-    ui = ApprovingUI()
-    server = BridgeServer(BridgeService(app, ui))
+    ui = approving_ui(app)
+    server = BridgeServer(LockableService(app, ui))
     assert server.start(endpoint_name)
     try:
         process = subprocess.Popen([NODE, os.path.join(os.path.dirname(__file__), "js", "background_flow.js"),
-                                    sys.executable, HOST_SCRIPT], stdout=subprocess.PIPE, text=True)
+                                    sys.executable, HOST_SCRIPT, MASTER], stdout=subprocess.PIPE, text=True)
         qtbot.waitUntil(lambda: process.poll() is not None, timeout=60000)
         result = json.loads(process.stdout.read())
     finally:
@@ -92,4 +112,9 @@ def test_background_script_through_native_host(qtbot, app, endpoint_name):  # no
 
     assert result["pageFill"] is None
     assert len(result["generate"]["password"]) == 20
-    assert result["storedKeys"] == ["clientId", "pairingKey"]
+    assert result["storedKeys"] == ["clientId", "pairingKey", "unlockKey"]
+
+    assert result["lockedStatus"] == "locked_can_unlock"
+    assert result["badUnlock"]["ok"] is False and "attempts remaining" in result["badUnlock"]["message"]
+    assert result["goodUnlock"] == {"ok": True, "message": ""}
+    assert result["afterUnlock"] == "ready"

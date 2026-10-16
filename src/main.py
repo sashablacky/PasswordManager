@@ -23,7 +23,9 @@ from ui import theme
 import app_settings
 
 # Lock the vault after this many minutes without mouse or keyboard activity
+# (the default; the user can pick one of the choices in Settings)
 AUTO_LOCK_MINUTES = 5
+AUTO_LOCK_CHOICES = app_settings.AUTO_LOCK_CHOICES
 
 
 def setup_logging():
@@ -98,6 +100,7 @@ class PasswordManagerApp:
         self.main_window = None
 
         # Auto-lock timer
+        self.auto_lock_minutes = self._saved_auto_lock_minutes()
         self.auto_lock_timer = None
         self.setup_auto_lock()
 
@@ -114,15 +117,27 @@ class PasswordManagerApp:
         self.auto_lock_timer.setSingleShot(True)
         self.auto_lock_timer.timeout.connect(self.auto_lock)
 
+    @staticmethod
+    def _saved_auto_lock_minutes() -> int:
+        minutes = app_settings.load_settings().get("auto_lock_minutes")
+        return minutes if minutes in AUTO_LOCK_CHOICES else AUTO_LOCK_MINUTES
+
+    def set_auto_lock_minutes(self, minutes: int):
+        if minutes not in AUTO_LOCK_CHOICES:
+            return
+        self.auto_lock_minutes = minutes
+        app_settings.save_settings(auto_lock_minutes=minutes)
+        self.reset_auto_lock()
+
     def reset_auto_lock(self):
         if self.auto_lock_timer and self.auth_manager.is_logged_in():
-            self.auto_lock_timer.start(AUTO_LOCK_MINUTES * 60 * 1000)
+            self.auto_lock_timer.start(self.auto_lock_minutes * 60 * 1000)
 
     def auto_lock(self):
         if not self.auth_manager.is_logged_in():
             return
 
-        print(f"Inactivity detected ({AUTO_LOCK_MINUTES} min). Locking vault.")
+        print(f"Inactivity detected ({self.auto_lock_minutes} min). Locking vault.")
         self.lock_vault()
 
     def lock_vault(self):
@@ -192,11 +207,27 @@ class PasswordManagerApp:
 
         self.show_main_window()
 
-    def show_main_window(self):
+    def unlock_from_browser(self, master_password: str):
+        """Master password typed into the browser extension; returns (ok, message)"""
+        if self.auth_manager.is_logged_in():
+            return True, "Already unlocked"
+        ok, message = self.auth_manager.authenticate(master_password)
+        if ok:
+            if self.login_widget:
+                self.login_widget.close()
+                self.login_widget = None
+            # Opened minimized, so the window doesn't jump in front of the browser
+            self.show_main_window(minimized=True)
+        return ok, message
+
+    def show_main_window(self, minimized=False):
         from ui.main_window import MainWindow
 
         self.main_window = MainWindow(self)
-        self.main_window.show()
+        if minimized:
+            self.main_window.showMinimized()
+        else:
+            self.main_window.show()
 
         # Start inactivity tracking AFTER login
         self.reset_auto_lock()

@@ -37,6 +37,38 @@ function openAppButton() {
   } }, t("openApp"));
 }
 
+function renderUnlock() {
+  const input = el("input", { type: "password", autocomplete: "off", placeholder: t("masterPassword") });
+  const button = el("button", { className: "primary wide", type: "submit" }, t("unlock"));
+  const note = el("div", { id: "note" });
+  const form = el("form", { className: "stack" }, input, button);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!input.value) return;
+    button.disabled = true;
+    const result = await send({ type: "unlock", password: input.value });
+    input.value = "";
+    button.disabled = false;
+    if (result.ok) {
+      main.replaceChildren(el("p", { className: "muted" }, t("popupLoading")));
+      start();
+      return;
+    }
+    note.replaceChildren(el("p", { className: "error" }, t("unlockFailed")),
+                         result.message ? el("p", { className: "muted" }, result.message) : "");
+    input.focus();
+  });
+  show(el("p", {}, el("b", {}, t("lockedTitle"))),
+       el("p", { className: "muted" }, t("unlockText")),
+       form, note,
+       el("p", { className: "muted small" }, el("a", { href: "#", onclick: async (e) => {
+         e.preventDefault();
+         await send({ type: "show_app" });
+         window.close();
+       } }, t("openApp"))));
+  input.focus();
+}
+
 function renderReady(status) {
   document.getElementById("site").textContent = status.site || "";
   const nodes = [];
@@ -94,6 +126,8 @@ async function start() {
           await api.tabs.create({ url: api.runtime.getURL("pair.html") });
           window.close();
         } }, t("connect")));
+    case "locked_can_unlock":
+      return renderUnlock();
     case "locked":
     case "locked_unpaired":
       return message("lockedTitle", "lockedText", openAppButton());

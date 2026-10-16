@@ -1,5 +1,5 @@
 """
-Small user preferences that are not secret (colour theme, browser extension on/off).
+Small user preferences that are not secret (colour theme, auto-lock time, browser extension on/off).
 
 They live in a JSON file in the per-user data folder, next to the vault but
 not inside it, so the theme can be applied before the vault is unlocked.
@@ -18,8 +18,12 @@ SETTINGS_FILE_NAME = "settings.json"
 # Set this environment variable to use a different settings file (e.g. for testing)
 SETTINGS_PATH_ENV = "PASSWORD_MANAGER_SETTINGS"
 
+# Minutes of inactivity after which the vault locks itself (offered in Settings)
+AUTO_LOCK_CHOICES = (5, 15, 30, 60)
+
 DEFAULTS = {
     "theme": "dusk",
+    "auto_lock_minutes": 5,
     # Accept connections from the browser extension (integration/)
     "browser_integration": True,
 }

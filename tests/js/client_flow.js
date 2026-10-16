@@ -26,7 +26,9 @@ async function main() {
   const secret = await SVCrypto.sharedSecret(privateKey, SVCrypto.b64d(pending.pub));
   const code = await SVCrypto.pairingCode(secret);
   const status = await send({ type: "pair_status", pairing: pending.pairing });
-  const pairingKey = await SVCrypto.unwrapPairingKey(secret, clientId, status.iv, status.ct);
+  const keys = await SVCrypto.unwrapPairingKey(secret, clientId, status.iv, status.ct);
+  const pairingKey = keys.slice(0, 32);
+  const unlockKey = keys.slice(32);
 
   const nonce = SVCrypto.randomBytes(16);
   const hello = await send({ type: "hello", client_id: clientId, nonce: SVCrypto.b64e(nonce) });
@@ -38,7 +40,16 @@ async function main() {
     const reply = await send(await SVCrypto.seal(session, { ...params, action }, session.seq));
     results.push(await SVCrypto.unseal(session, reply, session.seq));
   }
-  process.stdout.write(JSON.stringify({ done: true, code, results }) + "\n");
+  // Lock (a test-only message), then unlock with the master password
+  await send({ type: "test_lock" });
+  const locked = await send({ type: "hello", client_id: clientId, nonce: SVCrypto.b64e(SVCrypto.randomBytes(16)) });
+  const eph = await SVCrypto.newKeyPair();
+  const unlockSecret = await SVCrypto.sharedSecret(eph.privateKey, SVCrypto.b64d(locked.unlock.pub));
+  const sealed = await SVCrypto.sealUnlock(unlockKey, unlockSecret, SVCrypto.b64d(locked.unlock.nonce), clientId,
+                                           locked.unlock.id, process.argv[2]);
+  const unlocked = await send({ type: "unlock", client_id: clientId, id: locked.unlock.id,
+                                pub: SVCrypto.b64e(eph.pub), ...sealed });
+  process.stdout.write(JSON.stringify({ done: true, code, results, lockedState: locked.state, unlocked }) + "\n");
   process.exit(0);
 }
 

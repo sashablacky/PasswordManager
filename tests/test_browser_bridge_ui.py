@@ -75,3 +75,41 @@ def test_disconnect_all_browsers(app, monkeypatch, messages):  # noqa: F811
     assert window.paired_browsers() == []
     assert client.hello() == "unpaired"
     assert not window.settings_page.browsers_card.button.isEnabled()
+
+
+def test_unlock_from_browser_opens_the_vault(app, monkeypatch):  # noqa: F811
+    create_account(app, monkeypatch)
+    client = paired(app, monkeypatch)
+    from integration.server import AppBridgeUI
+    monkeypatch.setattr(app.bridge.service, "ui", AppBridgeUI(app))
+    app.main_window.lock_vault()
+    assert app.login_widget is not None
+
+    assert client.unlock("wrong password")["ok"] is False
+    assert app.main_window is None
+
+    assert client.unlock("FirstPass11!")["ok"] is True
+    assert app.auth_manager.is_logged_in()
+    assert app.login_widget is None
+    assert app.main_window is not None and app.main_window.isMinimized()
+    assert app.auto_lock_timer.isActive()
+
+
+def test_auto_lock_time_in_settings(app, monkeypatch):  # noqa: F811
+    create_account(app, monkeypatch)
+    card = app.main_window.settings_page.auto_lock_card
+    assert app.auto_lock_minutes == 5
+
+    card.combo.setCurrentIndex(card.choices.index(30))
+    assert app.auto_lock_minutes == 30
+    assert app.auto_lock_timer.interval() == 30 * 60 * 1000
+    assert app_settings.load_settings()["auto_lock_minutes"] == 30
+    assert "30 minutes" in app.main_window.settings_page.about_card.contentLabel.text()
+
+
+def test_saved_auto_lock_time_is_used_at_start(app, monkeypatch):  # noqa: F811
+    app_settings.save_settings(auto_lock_minutes=15)
+    from main import PasswordManagerApp
+    assert PasswordManagerApp._saved_auto_lock_minutes() == 15
+    app_settings.save_settings(auto_lock_minutes=7)
+    assert PasswordManagerApp._saved_auto_lock_minutes() == 5

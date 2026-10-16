@@ -10,6 +10,11 @@ messages along, so everything that matters is protected end to end here:
   from it is shown in the browser and in the program, the user allows the
   connection in the program, and the program sends a random 32-byte pairing
   key to the extension, encrypted with the shared secret.
+* Unlocking: at pairing the extension also gets an "unlock key", kept by
+  the program outside the encrypted vault. While the vault is locked, a
+  paired extension may send the master password typed into its popup,
+  encrypted with a key derived from a fresh ECDH exchange and the unlock key,
+  so only a paired extension can send it and only the program can read it.
 * Sessions: each session starts with two random nonces; the pairing key and
   the nonces give one AES-256-GCM key per direction (HKDF-SHA256). Every
   message carries a sequence number that must grow, so an old message can't
@@ -51,6 +56,7 @@ INFO_PAIR_CODE = b"securevault-pair-code"
 INFO_PAIR_WRAP = b"securevault-pair-wrap"
 INFO_SESSION_C2S = b"securevault-session-c2s"
 INFO_SESSION_S2C = b"securevault-session-s2c"
+INFO_UNLOCK = b"securevault-unlock"
 
 
 class ProtocolError(Exception):
@@ -149,6 +155,40 @@ def unwrap_pairing_key(secret: bytes, client_id: str, iv: str, ct: str) -> bytes
         raise
     except Exception:
         raise ProtocolError("pairing key does not decrypt")
+
+
+# ------------------------------------------------------------------ unlocking
+
+def _unlock_cipher(unlock_key: bytes, secret: bytes, server_nonce: bytes) -> AESGCM:
+    return AESGCM(hkdf(unlock_key + secret, INFO_UNLOCK, server_nonce))
+
+
+def _unlock_aad(client_id: str, challenge_id: str) -> bytes:
+    return f"securevault-unlock|{client_id}|{challenge_id}".encode("utf-8")
+
+
+def seal_unlock(unlock_key: bytes, secret: bytes, server_nonce: bytes, client_id: str, challenge_id: str,
+                password: str) -> Tuple[str, str]:
+    """Client side; the program's tests use it as the reference client"""
+    iv = os.urandom(IV_SIZE)
+    body = json.dumps({"password": password}).encode("utf-8")
+    ct = _unlock_cipher(unlock_key, secret, server_nonce).encrypt(iv, body, _unlock_aad(client_id, challenge_id))
+    return b64e(iv), b64e(ct)
+
+
+def open_unlock(unlock_key: bytes, secret: bytes, server_nonce: bytes, client_id: str, challenge_id: str,
+                iv: str, ct: str) -> str:
+    try:
+        body = _unlock_cipher(unlock_key, secret, server_nonce).decrypt(
+            b64d(iv, IV_SIZE), b64d(ct), _unlock_aad(client_id, challenge_id))
+        password = json.loads(body.decode("utf-8")).get("password")
+    except ProtocolError:
+        raise
+    except Exception:
+        raise ProtocolError("unlock message does not decrypt")
+    if not isinstance(password, str):
+        raise ProtocolError("invalid unlock message")
+    return password
 
 
 # ------------------------------------------------------------------ sessions

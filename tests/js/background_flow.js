@@ -10,7 +10,7 @@ const path = require("path");
 const vm = require("vm");
 
 const EXT = path.join(__dirname, "..", "..", "browser-extension", "extension");
-const [python, hostScript] = process.argv.slice(2);
+const [python, hostScript, masterPassword] = process.argv.slice(2);
 
 function memoryArea() {
   const data = {};
@@ -95,6 +95,13 @@ async function main() {
   r.pageFill = (await fromPage({ type: "fill", id: 1 })) ?? null;
   r.generate = await fromPopup({ type: "generate" });
   r.storedKeys = Object.keys(browser.storage.local.data).sort();
+
+  // Locked vault: the popup asks for the master password
+  await nativeMessage({ type: "test_lock" });
+  r.lockedStatus = (await fromPopup({ type: "status" })).state;
+  r.badUnlock = await fromPopup({ type: "unlock", password: "wrong password" });
+  r.goodUnlock = await fromPopup({ type: "unlock", password: masterPassword });
+  r.afterUnlock = (await fromPopup({ type: "status" })).state;
   process.stdout.write(JSON.stringify(r) + "\n");
 }
 

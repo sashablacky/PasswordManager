@@ -95,8 +95,21 @@ class Client:
     def pair_poll(self):
         reply = self.send({"type": "pair_status", "pairing": self._pairing})
         if reply["state"] == "approved":
-            self.pairing_key = protocol.unwrap_pairing_key(self._secret, self.client_id, reply["iv"], reply["ct"])
+            keys = protocol.unwrap_pairing_key(self._secret, self.client_id, reply["iv"], reply["ct"])
+            self.pairing_key, self.unlock_key = keys[:32], keys[32:]
         return reply["state"]
+
+    def unlock(self, password):
+        hello = self.send({"type": "hello", "client_id": self.client_id, "nonce": b64e(os.urandom(16))})
+        challenge = hello.get("unlock")
+        if challenge is None:
+            return hello
+        private = protocol.generate_keypair()
+        secret = protocol.shared_secret(private, b64d(challenge["pub"]))
+        iv, ct = protocol.seal_unlock(self.unlock_key, secret, b64d(challenge["nonce"]), self.client_id,
+                                      challenge["id"], password)
+        return self.send({"type": "unlock", "client_id": self.client_id, "id": challenge["id"],
+                          "pub": b64e(protocol.public_bytes(private)), "iv": iv, "ct": ct})
 
     def hello(self):
         nonce = os.urandom(protocol.NONCE_SIZE)
@@ -122,6 +135,8 @@ class RecordingUI(BridgeUI):
         self.changes = []
         self.activity = 0
         self.shown = 0
+        self.unlocks = 0
+        self.app = None
 
     def ask_pairing(self, browser, code, on_answer):
         self.questions.append((browser, code, on_answer))
@@ -134,6 +149,10 @@ class RecordingUI(BridgeUI):
 
     def user_activity(self):
         self.activity += 1
+
+    def unlock(self, master_password):
+        self.unlocks += 1
+        return self.app.auth_manager.authenticate(master_password)
 
 
 class FakeApp:
@@ -160,8 +179,10 @@ def app():
 
 
 @pytest.fixture
-def ui():
-    return RecordingUI()
+def ui(app):
+    recording = RecordingUI()
+    recording.app = app
+    return recording
 
 
 @pytest.fixture
@@ -460,3 +481,70 @@ def test_host_and_program_agree_on_the_endpoint(monkeypatch, tmp_path):
     if sys.platform == "win32":
         program = "\\\\.\\pipe\\" + program
     assert host.endpoint() == program
+
+
+# ------------------------------------------------------------------ unlocking from the browser
+
+def test_unlock_from_browser(app, service, ui):
+    client = paired_client(service, ui)
+    app.auth_manager.logout()
+    service.clear_sessions()
+    assert client.hello() == "locked"
+
+    reply = client.unlock("wrong password")
+    assert reply["type"] == "unlock_result" and reply["ok"] is False
+    assert "attempts remaining" in reply["message"]
+    assert not app.auth_manager.is_logged_in()
+
+    assert client.unlock(MASTER) == {"type": "unlock_result", "ok": True}
+    assert app.auth_manager.is_logged_in()
+    assert client.hello() == "ready"
+
+
+def test_unlock_offered_only_to_paired_browsers(app, service, ui):
+    paired_client(service, ui)
+    app.auth_manager.logout()
+    stranger = {"type": "hello", "client_id": str(uuid.uuid4()), "nonce": b64e(os.urandom(16))}
+    assert "unlock" not in service.handle(stranger)
+    assert "unlock" not in service.handle({"type": "hello", "client_id": None})
+
+
+def test_unlock_needs_the_unlock_key(app, service, ui):
+    client = paired_client(service, ui)
+    app.auth_manager.logout()
+    client.unlock_key = os.urandom(32)
+    assert client.unlock(MASTER) == {"type": "error", "code": "bad_message"}
+    assert not app.auth_manager.is_logged_in()
+    assert ui.unlocks == 0
+
+
+def test_unlock_challenge_is_single_use(app, service, ui):
+    client = paired_client(service, ui)
+    app.auth_manager.logout()
+    sent = []
+    original = client.send
+    client.send = lambda m: (sent.append(m), original(m))[1]
+    assert client.unlock(MASTER)["ok"]
+    app.auth_manager.logout()
+    assert service.handle(sent[-1]) == {"type": "error", "code": "unlock_expired"}
+    assert not app.auth_manager.is_logged_in()
+
+
+def test_unlock_attempts_count_towards_lockout(app, service, ui):
+    client = paired_client(service, ui)
+    app.auth_manager.logout()
+    for _ in range(app.auth_manager.MAX_FAILED_ATTEMPTS):
+        client.unlock("wrong password")
+    reply = client.unlock(MASTER)
+    assert reply["ok"] is False and "locked" in reply["message"].lower()
+    assert not app.auth_manager.is_logged_in()
+
+
+def test_unlock_key_column_added_to_old_table(app, service):
+    app.db.execute_query("DROP TABLE IF EXISTS browser_clients")
+    app.db.execute_query("""CREATE TABLE browser_clients (client_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+                            browser TEXT NOT NULL DEFAULT '', encrypted_key BLOB NOT NULL,
+                            created_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used TIMESTAMP)""")
+    assert service.store.get_unlock_key("x") is None
+    columns = {row["name"] for row in app.db.fetch_all("PRAGMA table_info(browser_clients)")}
+    assert "unlock_key" in columns

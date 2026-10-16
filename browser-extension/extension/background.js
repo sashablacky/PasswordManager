@@ -137,10 +137,36 @@ async function pairPoll() {
     if (reply.state === "pending") return { state: "pending", code: pairing.code };
     await api.storage.session.remove("pairing");
     if (reply.state !== "approved") return { state: reply.state };
-    const key = await SVCrypto.unwrapPairingKey(SVCrypto.b64d(pairing.secret), await clientId(), reply.iv, reply.ct);
-    await api.storage.local.set({ pairingKey: SVCrypto.b64e(key) });
+    const keys = await SVCrypto.unwrapPairingKey(SVCrypto.b64d(pairing.secret), await clientId(), reply.iv, reply.ct);
+    // The pairing key, followed by the key for sending the master password when the vault is locked
+    await api.storage.local.set({ pairingKey: SVCrypto.b64e(keys.slice(0, 32)),
+                                  unlockKey: SVCrypto.b64e(keys.slice(32)) });
     await api.storage.session.remove("session");
     return { state: "approved" };
+  });
+}
+
+// ------------------------------------------------------------ unlocking
+
+async function unlockWithPassword(password) {
+  if (typeof password !== "string" || !password) return { ok: false, error: "missing_password" };
+  return serialized(async () => {
+    const unlockKey = await localGet("unlockKey");
+    if (!unlockKey) return { ok: false, error: "unpaired" };
+    const id = await clientId();
+    const hello = await nativeSend({ type: "hello", client_id: id, nonce: SVCrypto.b64e(SVCrypto.randomBytes(16)) });
+    if (hello.type === "error") return { ok: false, error: hello.code };
+    if (hello.state !== "locked") return { ok: hello.state === "ready" };
+    if (!hello.unlock) return { ok: false, error: "unpaired" };
+    const { privateKey, pub } = await SVCrypto.newKeyPair();
+    const secret = await SVCrypto.sharedSecret(privateKey, SVCrypto.b64d(hello.unlock.pub));
+    const sealed = await SVCrypto.sealUnlock(SVCrypto.b64d(unlockKey), secret, SVCrypto.b64d(hello.unlock.nonce),
+                                             id, hello.unlock.id, password);
+    const reply = await nativeSend({ type: "unlock", client_id: id, id: hello.unlock.id,
+                                     pub: SVCrypto.b64e(pub), ...sealed });
+    if (reply.type === "error") return { ok: false, error: reply.code };
+    if (reply.ok) await api.storage.session.remove("session");
+    return { ok: !!reply.ok, message: reply.message || "" };
   });
 }
 
@@ -264,11 +290,13 @@ async function popupStatus() {
   }
   if (!tab || !isWebPage(tab.url)) {
     const ping = await call("ping");
+    if (ping.error === "locked" && await localGet("unlockKey")) return { state: "locked_can_unlock" };
     return ping.error ? { state: ping.error } : { state: "ready", site: null, logins: [] };
   }
   const result = await call("get_logins", { url: tab.url });
   if (result.error) {
-    if (result.error === "unpaired") await api.storage.local.remove("pairingKey");
+    if (result.error === "unpaired") await api.storage.local.remove(["pairingKey", "unlockKey"]);
+    if (result.error === "locked" && await localGet("unlockKey")) return { state: "locked_can_unlock" };
     return { state: result.error };
   }
   return { state: "ready", site: result.site, logins: result.logins };
@@ -310,10 +338,12 @@ api.runtime.onMessage.addListener((message, sender) => {
       return activeTab().then((tab) => fillLogin(tab, message.id));
     case "generate":
       return generateIntoPage();
+    case "unlock":
+      return unlockWithPassword(message.password);
     case "show_app":
       return serialized(() => nativeSend({ type: "show_app" }));
     case "unpair":
-      return api.storage.local.remove(["pairingKey"]).then(() => api.storage.session.remove("session"))
+      return api.storage.local.remove(["pairingKey", "unlockKey"]).then(() => api.storage.session.remove("session"))
         .then(() => ({ ok: true }));
     default:
       return undefined;

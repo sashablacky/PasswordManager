@@ -7,7 +7,9 @@ from PyQt5.QtCore import Qt, QRectF, QSize, pyqtSignal
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QAbstractButton, QButtonGroup, QFrame)
 
-from qfluentwidgets import SettingCardGroup, PushSettingCard, SwitchSettingCard, FluentIcon, ScrollArea
+from qfluentwidgets import (SettingCardGroup, SettingCard, PushSettingCard, SwitchSettingCard, ComboBox,
+                            FluentIcon, ScrollArea)
+import app_settings
 from ui import theme
 from ui.clipboard import CLIPBOARD_CLEAR_SECONDS
 from ui.icons import AppIcon
@@ -114,6 +116,24 @@ class ThemeCard(theme.GlassCard):
             self.swatches[key].setChecked(True)
 
 
+class AutoLockCard(SettingCard):
+    """How long the vault stays unlocked without activity"""
+
+    minutes_changed = pyqtSignal(int)
+
+    def __init__(self, app, parent=None):
+        super().__init__(AppIcon.LOCK, "Lock automatically",
+                         "After this time without activity in the program or the browser extension", parent)
+        self.choices = app_settings.AUTO_LOCK_CHOICES
+        self.combo = ComboBox(self)
+        self.combo.addItems([f"{m} minutes" for m in self.choices])
+        if app.auto_lock_minutes in self.choices:
+            self.combo.setCurrentIndex(self.choices.index(app.auto_lock_minutes))
+        self.combo.currentIndexChanged.connect(lambda i: self.minutes_changed.emit(self.choices[i]))
+        self.hBoxLayout.addWidget(self.combo, 0, Qt.AlignRight)
+        self.hBoxLayout.addSpacing(16)
+
+
 class SettingsPage(ScrollArea):
     """All settings in one scrollable page"""
 
@@ -159,6 +179,9 @@ class SettingsPage(ScrollArea):
              "Replace the vault with a backup (the current one is kept as a copy)", "Restore",
              window.restore_backup),
         ]
+        self.auto_lock_card = AutoLockCard(window.app)
+        self.auto_lock_card.minutes_changed.connect(self._on_auto_lock_changed)
+        vault.addSettingCard(self.auto_lock_card)
         self.vault_cards = {}
         for icon, title, content_text, button_text, slot in cards:
             card = PushSettingCard(button_text, icon, title, content_text)
@@ -192,16 +215,23 @@ class SettingsPage(ScrollArea):
 
         # About
         about = SettingCardGroup("About", content)
-        about_card = PushSettingCard(
-            "About", FluentIcon.INFO, "Password Manager",
-            f"Locks itself after {window.app.auto_lock_minutes} minutes without activity. Copied passwords "
-            f"are cleared from the clipboard after {CLIPBOARD_CLEAR_SECONDS} seconds."
-        )
+        self.about_card = about_card = PushSettingCard("About", FluentIcon.INFO, "Password Manager", "")
+        self._update_about_text()
         about_card.clicked.connect(window.show_about)
         about.addSettingCard(about_card)
         layout.addWidget(about)
 
         layout.addStretch(1)
+
+    def _update_about_text(self):
+        self.about_card.setContent(
+            f"Locks itself after {self.window_.app.auto_lock_minutes} minutes without activity. Copied passwords "
+            f"are cleared from the clipboard after {CLIPBOARD_CLEAR_SECONDS} seconds."
+        )
+
+    def _on_auto_lock_changed(self, minutes):
+        self.window_.app.set_auto_lock_minutes(minutes)
+        self._update_about_text()
 
     def update_browser_status(self):
         count = len(self.window_.paired_browsers())
