@@ -70,8 +70,8 @@ jobs:
       - name: Tests (all, native window system)
         run: |
           set -o pipefail
-          if ! python -X faulthandler -m pytest -v -p no:cacheprovider tests 2>&1 | tee pytest-native.log; then
-            tail -n 80 pytest-native.log | python -c "import sys; t = sys.stdin.read().replace('%', '%25').replace('\r', '').replace('\n', '%0A'); print('::error title=Native tests failed::' + t)"
+          if ! python -X faulthandler -m pytest -v -rfE --tb=short -p no:cacheprovider tests 2>&1 | tee pytest-native.log; then
+            python .github/scripts/annotate_failure.py "Native tests failed" < pytest-native.log
             exit 1
           fi
 
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -o pipefail
           if ! ./packaging/macos/build_macos.sh --skip-install --skip-tests 2>&1 | tee build.log; then
-            tail -n 40 build.log | python -c "import sys; t = sys.stdin.read().replace('%', '%25').replace('\r', '').replace('\n', '%0A'); print('::error title=Build failed::' + t)"
+            python .github/scripts/annotate_failure.py "Build failed" < build.log
             exit 1
           fi
 
