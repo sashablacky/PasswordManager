@@ -1,0 +1,134 @@
+{
+  "extName": {
+    "message": "SecureVault"
+  },
+  "extDescription": {
+    "message": "Заполняет и сохраняет пароли из менеджера паролей SecureVault на этом компьютере."
+  },
+  "commandFill": {
+    "message": "Заполнить логин и пароль для этого сайта"
+  },
+  "popupLoading": {
+    "message": "Подключаюсь к SecureVault…"
+  },
+  "openApp": {
+    "message": "Открыть SecureVault"
+  },
+  "notAWebPage": {
+    "message": "Откройте сайт, чтобы заполнить пароль."
+  },
+  "noLogins": {
+    "message": "Для этого сайта пока нет паролей. Когда вы войдёте на сайт, SecureVault предложит сохранить пароль."
+  },
+  "pickLogin": {
+    "message": "Нажмите на вход, чтобы заполнить его:"
+  },
+  "noUsername": {
+    "message": "(без имени пользователя)"
+  },
+  "generate": {
+    "message": "Придумать надёжный пароль"
+  },
+  "generatedFilled": {
+    "message": "Вставлен на страницу. Он сохранится, когда вы закончите регистрацию."
+  },
+  "generatedCopy": {
+    "message": "Поле для пароля не найдено. Скопируйте его отсюда:"
+  },
+  "fillFailed": {
+    "message": "Не получилось заполнить пароль. Обновите страницу и попробуйте снова."
+  },
+  "noFieldFound": {
+    "message": "На этой странице не нашлось поля для входа."
+  },
+  "unpairedTitle": {
+    "message": "Этот браузер ещё не подключён"
+  },
+  "unpairedText": {
+    "message": "Подключите его один раз, и SecureVault будет заполнять здесь ваши пароли."
+  },
+  "connect": {
+    "message": "Подключить"
+  },
+  "lockedTitle": {
+    "message": "SecureVault заблокирован"
+  },
+  "lockedText": {
+    "message": "Введите мастер-пароль в программе и откройте это окно снова."
+  },
+  "notRunningTitle": {
+    "message": "SecureVault не запущен"
+  },
+  "notRunningText": {
+    "message": "Запустите программу SecureVault и попробуйте снова."
+  },
+  "hostMissingTitle": {
+    "message": "SecureVault не настроен для этого браузера"
+  },
+  "hostMissingText": {
+    "message": "Один раз установите связь SecureVault с браузером (см. инструкцию) и перезапустите браузер."
+  },
+  "errorTitle": {
+    "message": "Что-то пошло не так"
+  },
+  "pairTitle": {
+    "message": "Подключение браузера к SecureVault"
+  },
+  "pairStep1": {
+    "message": "Перейдите в программу SecureVault. В ней появится вопрос про этот браузер."
+  },
+  "pairStep2": {
+    "message": "Проверьте, что в программе тот же код, что и здесь."
+  },
+  "pairStep3": {
+    "message": "Нажмите в программе «Allow» (Разрешить)."
+  },
+  "pairWaiting": {
+    "message": "Жду вашего ответа в программе…"
+  },
+  "pairDoneTitle": {
+    "message": "Готово"
+  },
+  "pairDoneText": {
+    "message": "Браузер подключён к SecureVault. Эту вкладку можно закрыть."
+  },
+  "pairFailedTitle": {
+    "message": "Не подключено"
+  },
+  "pairRejected": {
+    "message": "В программе подключение было отклонено."
+  },
+  "pairExpired": {
+    "message": "Программа не ответила вовремя."
+  },
+  "pairLocked": {
+    "message": "Сначала разблокируйте SecureVault мастер-паролем."
+  },
+  "pairBusy": {
+    "message": "Программа уже спрашивает про другой браузер. Сначала ответьте на тот вопрос."
+  },
+  "tryAgain": {
+    "message": "Попробовать снова"
+  },
+  "saveBarSaveTitle": {
+    "message": "Сохранить пароль в SecureVault?"
+  },
+  "saveBarUpdateTitle": {
+    "message": "Обновить сохранённый пароль?"
+  },
+  "saveBarSave": {
+    "message": "Сохранить"
+  },
+  "saveBarUpdate": {
+    "message": "Обновить"
+  },
+  "saveBarLater": {
+    "message": "Не сейчас"
+  },
+  "saveBarDone": {
+    "message": "Сохранено в SecureVault"
+  },
+  "saveBarFailed": {
+    "message": "Не удалось сохранить. SecureVault разблокирован?"
+  }
+}

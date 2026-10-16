@@ -1,0 +1,32 @@
+:root {
+  --bg: #1C2127; --panel: #252B32; --line: #3E4954; --text: #D6D1C7; --muted: #A9A49B;
+  --accent: #C8B898; --on-accent: #1C2127; --accent2: #9DB1A5; --bad: #CF8F88;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+       font: 14px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+header img { width: 22px; height: 22px; }
+header .name { font-weight: 600; }
+header .site { margin-left: auto; color: var(--muted); font-size: 12px; max-width: 150px;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+main { padding: 14px; }
+p { margin: 0 0 10px; }
+.muted { color: var(--muted); font-size: 13px; }
+button { font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--line);
+         background: transparent; color: var(--text); }
+button:hover { background: rgba(214, 209, 199, .06); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button.wide { width: 100%; }
+.stack > * + * { margin-top: 8px; }
+.logins { list-style: none; margin: 0 0 12px; padding: 0; }
+.logins li button { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 1px;
+                    border: 1px solid transparent; background: var(--panel); margin-bottom: 6px; }
+.logins li button:hover { border-color: var(--line); }
+.logins .title { font-weight: 600; }
+.logins .user { color: var(--muted); font-size: 13px; }
+.code { font-size: 34px; font-weight: 700; letter-spacing: 6px; text-align: center; margin: 14px 0;
+        color: var(--accent); font-variant-numeric: tabular-nums; }
+.generated { font-family: ui-monospace, Consolas, monospace; background: var(--panel); border-radius: 8px;
+             padding: 8px; word-break: break-all; margin-top: 8px; user-select: all; }
+.error { color: var(--bad); }

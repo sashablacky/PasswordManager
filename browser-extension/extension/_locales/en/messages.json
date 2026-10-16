@@ -1,0 +1,134 @@
+{
+  "extName": {
+    "message": "SecureVault"
+  },
+  "extDescription": {
+    "message": "Fill in and save passwords from the SecureVault password manager on this computer."
+  },
+  "commandFill": {
+    "message": "Fill in the login for this site"
+  },
+  "popupLoading": {
+    "message": "Connecting to SecureVault…"
+  },
+  "openApp": {
+    "message": "Open SecureVault"
+  },
+  "notAWebPage": {
+    "message": "Open a website to fill in a password."
+  },
+  "noLogins": {
+    "message": "No saved passwords for this site yet. After you sign in, SecureVault offers to save the password."
+  },
+  "pickLogin": {
+    "message": "Click a login to fill it in:"
+  },
+  "noUsername": {
+    "message": "(no username)"
+  },
+  "generate": {
+    "message": "Generate a strong password"
+  },
+  "generatedFilled": {
+    "message": "Filled into the page. It is saved when you finish signing up."
+  },
+  "generatedCopy": {
+    "message": "No password field found. Copy it from here:"
+  },
+  "fillFailed": {
+    "message": "Could not fill in the password. Reload the page and try again."
+  },
+  "noFieldFound": {
+    "message": "No login field found on this page."
+  },
+  "unpairedTitle": {
+    "message": "This browser is not connected yet"
+  },
+  "unpairedText": {
+    "message": "Connect it once, and SecureVault will fill in your passwords here."
+  },
+  "connect": {
+    "message": "Connect"
+  },
+  "lockedTitle": {
+    "message": "SecureVault is locked"
+  },
+  "lockedText": {
+    "message": "Enter your master password in the program, then open this window again."
+  },
+  "notRunningTitle": {
+    "message": "SecureVault is not running"
+  },
+  "notRunningText": {
+    "message": "Start the SecureVault program, then try again."
+  },
+  "hostMissingTitle": {
+    "message": "SecureVault is not set up for this browser"
+  },
+  "hostMissingText": {
+    "message": "Install the browser connection of SecureVault once (see the instructions), then restart the browser."
+  },
+  "errorTitle": {
+    "message": "Something went wrong"
+  },
+  "pairTitle": {
+    "message": "Connect this browser to SecureVault"
+  },
+  "pairStep1": {
+    "message": "Switch to the SecureVault program. It shows a question about this browser."
+  },
+  "pairStep2": {
+    "message": "Check that the program shows the same code as here."
+  },
+  "pairStep3": {
+    "message": "Click \"Allow\" in the program."
+  },
+  "pairWaiting": {
+    "message": "Waiting for your answer in the program…"
+  },
+  "pairDoneTitle": {
+    "message": "Connected"
+  },
+  "pairDoneText": {
+    "message": "This browser is connected to SecureVault. You can close this tab."
+  },
+  "pairFailedTitle": {
+    "message": "Not connected"
+  },
+  "pairRejected": {
+    "message": "The connection was denied in the program."
+  },
+  "pairExpired": {
+    "message": "The program did not answer in time."
+  },
+  "pairLocked": {
+    "message": "Unlock SecureVault with your master password first."
+  },
+  "pairBusy": {
+    "message": "The program is already asking about another browser. Answer that question first."
+  },
+  "tryAgain": {
+    "message": "Try again"
+  },
+  "saveBarSaveTitle": {
+    "message": "Save this password in SecureVault?"
+  },
+  "saveBarUpdateTitle": {
+    "message": "Update the saved password?"
+  },
+  "saveBarSave": {
+    "message": "Save"
+  },
+  "saveBarUpdate": {
+    "message": "Update"
+  },
+  "saveBarLater": {
+    "message": "Not now"
+  },
+  "saveBarDone": {
+    "message": "Saved in SecureVault"
+  },
+  "saveBarFailed": {
+    "message": "Could not save. Is SecureVault unlocked?"
+  }
+}
