@@ -156,6 +156,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      NEEDS_REAL_WINDOW: tests/test_browser_bridge_ui.py::test_unlock_from_browser_opens_the_vault
     steps:
       - uses: actions/checkout@v7
 
@@ -177,8 +179,21 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           set -o pipefail
-          if ! python -m pytest -q -rfE --tb=short -p no:cacheprovider tests 2>&1 | tee pytest-windows.log; then
+          if ! python -m pytest -q -rfE --tb=short -p no:cacheprovider tests \
+              --deselect "$NEEDS_REAL_WINDOW" 2>&1 | tee pytest-windows.log; then
             python .github/scripts/annotate_failure.py "Windows tests failed" < pytest-windows.log
+            exit 1
+          fi
+
+      # Minimizing a Fluent window asks Windows about its handle (GetWindowPlacement);
+      # the offscreen platform has no real handle, so this test needs the runner's desktop
+      - name: Tests (real window)
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          set -o pipefail
+          if ! python -m pytest -q -rfE --tb=short -p no:cacheprovider "$NEEDS_REAL_WINDOW" 2>&1 | tee pytest-window.log; then
+            python .github/scripts/annotate_failure.py "Windows window test failed" < pytest-window.log
             exit 1
           fi
 
