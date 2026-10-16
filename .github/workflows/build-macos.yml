@@ -1,0 +1,84 @@
+name: Build macOS app
+
+# Builds "Password Manager.app" for Apple Silicon and Intel Macs, packed in a
+# .dmg, and keeps it as a downloadable artifact of the run (Actions tab ->
+# the run -> Artifacts). Runs on every push to main and by hand.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14          # Apple Silicon (M1 and later)
+            arch: arm64
+          - runner: macos-15-intel    # Intel Macs
+            arch: x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            packaging/macos/requirements-build.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r packaging/macos/requirements-build.txt
+          python -c "import platform, PyQt5.QtCore as q; print(platform.machine(), 'Qt', q.QT_VERSION_STR)"
+
+      # The Fluent window frame calls into the native Cocoa window, which the
+      # offscreen Qt platform does not have, so the tests run on the runner's
+      # real window system. The platform-independent tests also run offscreen.
+      - name: Tests (offscreen, without the Fluent window tests)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q tests --ignore=tests/test_ui_smoke.py --ignore=tests/test_theme_settings.py
+
+      - name: Tests (all, native window system)
+        run: python -m pytest -q tests
+
+      - name: Build app and dmg
+        run: ./packaging/macos/build_macos.sh --skip-install --skip-tests
+
+      - name: Check the bundle
+        run: |
+          APP="dist/Password Manager.app"
+          plutil -p "$APP/Contents/Info.plist"
+          file "$APP/Contents/MacOS/Password Manager"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # Start the app for a few seconds: it must not crash on start-up
+          "$APP/Contents/MacOS/Password Manager" &
+          PID=$!
+          sleep 15
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "The app exited during start-up"; wait $PID; exit 1
+          fi
+          kill $PID
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PasswordManager-macOS-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 30

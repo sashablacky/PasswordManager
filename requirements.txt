@@ -1,9 +1,14 @@
 # Core Libraries
 PyQt5==5.15.10
-PyQt5-Qt5==5.15.2
+# Qt itself: 5.15.2 is the last build with Windows wheels, but on macOS it has only
+# Intel wheels; Apple Silicon (arm64) needs 5.15.11 or later
+PyQt5-Qt5==5.15.2; sys_platform != "darwin"
+PyQt5-Qt5==5.15.14; sys_platform == "darwin"
 PyQt5-sip==12.13.0
 # Fluent Design widgets (window, navigation, themes) on PyQt5
 PyQt-Fluent-Widgets[full]==1.11.3
+# Its window frame (PyQt5-Frameless-Window) pulls in the platform packages by itself:
+# pywin32 on Windows, pyobjc + PyCocoa on macOS
 
 # Cryptography
 cryptography==41.0.7

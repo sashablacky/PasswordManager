@@ -3,6 +3,9 @@ from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 import json
 import logging
+import os
+
+from platform_utils import restrict_file
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,9 @@ class DatabaseManager:
     def connect(self) -> None:
         try:
             self.connection = sqlite3.connect(self.db_path)
+            # The vault file is created world-readable on macOS/Linux (no-op on Windows)
+            if os.path.exists(self.db_path):
+                restrict_file(self.db_path)
             self.connection.row_factory = sqlite3.Row  # Return rows as dictionaries
             # SQLite ignores FOREIGN KEY / ON DELETE rules unless this is enabled per connection
             self.connection.execute("PRAGMA foreign_keys = ON")
@@ -282,6 +288,7 @@ class DatabaseManager:
         """Write a consistent copy of the open database to target_path"""
         target = sqlite3.connect(target_path)
         try:
+            restrict_file(target_path)
             self.connection.backup(target)
         finally:
             target.close()

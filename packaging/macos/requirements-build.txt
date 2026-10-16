@@ -1,0 +1,2 @@
+# Packaging the macOS app (see build_macos.sh); not needed to run the program
+pyinstaller==6.19.0

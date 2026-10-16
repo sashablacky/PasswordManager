@@ -10,6 +10,8 @@ from PyQt5.QtCore import Qt, QObject, QEvent, QTimer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app_paths import get_db_path, get_log_path
+from platform_utils import is_mac, restrict_file
+from version import __version__
 from database.db_manager import DatabaseManager
 from security.encryption import EncryptionEngine
 from managers.auth_manager import AuthenticationManager
@@ -32,6 +34,8 @@ def setup_logging():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         force=True
     )
+    if os.path.exists(get_log_path()):
+        restrict_file(get_log_path())
 
 
 def handle_exception(exc_type, exc_value, exc_tb):
@@ -181,6 +185,7 @@ class PasswordManagerApp:
         self.db.disconnect()
         try:
             shutil.copy2(backup_path, self.db_path)
+            restrict_file(self.db_path)
         finally:
             # Reconnect either way: to the restored vault, or to the old one if the copy failed
             self.reopen_database()
@@ -208,8 +213,11 @@ def main():
 
     app.setApplicationName("Password Manager")
     app.setOrganizationName("SecureVault")
-    app.setApplicationVersion("1.3.0")
+    app.setApplicationVersion(__version__)
     app.setStyle('Fusion')
+    if is_mac():
+        # Dock icon when started from the sources (the .app bundle has its own .icns)
+        app.setWindowIcon(theme.app_icon())
 
     try:
         password_manager_app = PasswordManagerApp()

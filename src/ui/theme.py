@@ -23,6 +23,8 @@ from PyQt5.QtGui import (QColor, QFont, QFontDatabase, QIcon, QPainter,
                          QPalette, QPen, QPixmap, QRadialGradient)
 from PyQt5.QtWidgets import QAbstractButton, QApplication, QFrame, QSizePolicy, QWidget
 
+import platform_utils
+
 logger = logging.getLogger(__name__)
 
 
@@ -132,22 +134,32 @@ def _first_family(candidates):
 
 
 def ui_font(pixel_size=14, weight=QFont.Normal, display=False) -> QFont:
-    if display:
-        family = _first_family(["Segoe UI Variable Display", "Segoe UI", "Sans Serif"])
-    else:
-        family = _first_family(["Segoe UI Variable Text", "Segoe UI", "Sans Serif"])
-    font = QFont(family)
+    font = QFont(_first_family(platform_utils.ui_font_families(display)))
     font.setPixelSize(pixel_size)
     font.setWeight(weight)
     return font
 
 
 def mono_font(pixel_size=14, weight=QFont.Normal) -> QFont:
-    font = QFont(_first_family(["Cascadia Mono", "Consolas", "Courier New"]))
+    font = QFont(_first_family(platform_utils.mono_font_families()))
     font.setStyleHint(QFont.Monospace)
     font.setPixelSize(pixel_size)
     font.setWeight(weight)
     return font
+
+
+def apply_platform_fonts() -> None:
+    """Fluent widgets ask for Segoe UI, which a Mac does not have: give them the Mac fonts.
+
+    Only fonts that are installed are listed, so Qt does not search for missing ones.
+    Windows keeps the Fluent defaults.
+    """
+    if not platform_utils.is_mac():
+        return
+    from qfluentwidgets import setFontFamilies
+    installed = set(QFontDatabase().families())
+    families = [f for f in platform_utils.ui_font_families() if f in installed]
+    setFontFamilies(families + ["PingFang SC"])
 
 
 # ---------------------------------------------------------------- strength and risk
@@ -315,6 +327,7 @@ def apply_theme(key: str, save: bool = False) -> Palette:
 def init_theme() -> Palette:
     """Apply the theme saved in the settings file"""
     import app_settings
+    apply_platform_fonts()
     return apply_theme(app_settings.load_settings().get("theme", DEFAULT_THEME))
 
 
@@ -468,18 +481,24 @@ def dot_icon(color, size=16, diameter=8) -> QIcon:
 
 def app_icon() -> QIcon:
     """Window icon: a lock on an accent-coloured tile"""
+    return QIcon(app_icon_pixmap(64))
+
+
+def app_icon_pixmap(size: int = 64) -> QPixmap:
+    """The window icon drawn at size x size pixels (large sizes are used for the macOS .icns)"""
     from ui.icons import AppIcon
     p = current()
-    pixmap = QPixmap(64, 64)
+    pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
+    painter.scale(size / 64, size / 64)
     painter.setPen(Qt.NoPen)
     painter.setBrush(QColor(p.accent))
     painter.drawRoundedRect(QRectF(2, 2, 60, 60), 15, 15)
     AppIcon.LOCK.render(painter, QRectF(14, 14, 36, 36), fill=p.on_accent)
     painter.end()
-    return QIcon(pixmap)
+    return pixmap
 
 
 # ---------------------------------------------------------------- widgets

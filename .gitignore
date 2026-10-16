@@ -25,12 +25,18 @@ __pycache__/
 coverage.xml
 htmlcov/
 .venv/
+.venv-macos/
 venv/
 
 # Build output
 build/
 dist/
 *.spec
+# ...except the macOS bundle recipe, which is written by hand
+!packaging/macos/PasswordManager.spec
 
 # Local copies made before big changes
 backups/
+
+# macOS
+.DS_Store

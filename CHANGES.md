@@ -140,3 +140,37 @@ python -m pytest tests
 ## Тесты
 
 `python -m pytest tests` (`QT_QPA_PLATFORM=offscreen`): **236 passed** (231 прежних и 5 новых в `tests/test_theme_settings.py`: тема сохраняется, загружается при следующем запуске, применяется сразу, битый файл настроек даёт тему по умолчанию). В `tests/test_ui_smoke.py` изменён один тест: таблица стала списком (`entry_list`), фильтр силы переехал в счётчики. `tests/conftest.py` направляет файл настроек во временную папку, чтобы тесты не трогали настоящий.
+
+# Версия 1.4: macOS
+
+Программа работает на macOS (Apple Silicon и Intel), на Windows поведение не изменилось. Готовое приложение `.app` в `.dmg` собирает GitHub Actions, свой Mac для этого не нужен. Как поставить на Mac без терминала: `docs/macos-install.md`.
+
+## Что изменилось для пользователя
+
+- **Mac:** данные в `~/Library/Application Support/SecureVault` (на Windows по-прежнему `%APPDATA%\SecureVault`). Папка доступна только владельцу (0700), хранилище, резервные копии, экспорт CSV и журнал создаются с правами 0600: на macOS и Linux файлы по умолчанию читаются всеми пользователями компьютера. На Windows права не трогаются.
+- **Горячие клавиши на Mac** через ⌘: ⌘N, ⌘F, ⌘G, ⌘L, ⌘Q; дополнительно ⌘R (обновить) и ⌘⌫ (удалить запись), потому что F5 и Delete на клавиатуре Mac нажимаются только с Fn. Подсказка в поиске показывает «⌘F» вместо «Ctrl+F».
+- **Буфер обмена на Mac:** скопированный пароль помечается как секретный (`org.nspasteboard.ConcealedType` / `TransientType`), менеджеры буфера обмена (Alfred, Raycast, Maccy, Paste) его не сохраняют. Очистка через 30 секунд, при блокировке и выходе как на Windows.
+- **Шрифты на Mac:** SF Pro, если установлен, иначе Helvetica Neue; пароли — SF Mono / Menlo. Segoe UI и Cascadia остаются на Windows.
+- **Окно на Mac:** родные кнопки-«светофор», без Mica (она есть только в Windows 11, на Mac рисуется градиентный фон темы, как на Windows 10). Иконка в Dock — тот же замок, что у окна.
+- **Сохранение экспорта и копии на Mac** по умолчанию предлагается в «Документы»: у приложения, запущенного из Finder, текущая папка `/`, туда писать нельзя.
+- В «О программе» номер версии берётся из `src/version.py` (1.4.0).
+
+## Как устроено
+
+- `src/platform_utils.py` — все различия платформ: права файлов, папка для сохранения, горячие клавиши и их подписи, списки шрифтов. `sys.platform` читается при каждом вызове, поэтому ветки macOS проверяются тестами на Windows через `monkeypatch`.
+- `app_paths.get_data_base_dir()` — системная папка данных для Windows, macOS и Linux (XDG).
+- `ui/clipboard.py` — на Mac (только с родным бэкендом Qt `cocoa`) пароль кладётся в `NSPasteboard` через PyObjC с метками секрета; если не вышло, через обычный буфер Qt.
+- `ui/theme.py` — `apply_platform_fonts()` передаёт Fluent-виджетам шрифты Mac; `app_icon_pixmap(size)` рисует иконку любого размера (для `.icns`).
+- `requirements.txt`: `PyQt5-Qt5==5.15.2` только для Windows/Linux (у 5.15.2 нет сборки для Apple Silicon), на macOS `PyQt5-Qt5==5.15.14`. PyObjC на Mac ставится сам как зависимость `PyQt5-Frameless-Window`. Проверено `uv pip compile` для arm64 и x86_64 macOS и для Windows: всё ставится из готовых wheel, набор пакетов на Windows не изменился.
+- `packaging/macos/`: `PasswordManager.spec` (PyInstaller, windowed, `BUNDLE` → `Password Manager.app`, bundle id `io.github.sashablacky.securevault`, Info.plist с версией, Retina, тёмным режимом, minimum macOS 11), `SecureVault.icns` (генерирует `make_icns.py` из иконки окна), `build_macos.sh` (venv, тесты, сборка, подпись ad hoc, `.dmg` со ссылкой на «Программы»), `requirements-build.txt` (PyInstaller 6.19.0).
+- `.github/workflows/build-macos.yml`: на каждый push в `main` и вручную. Матрица `macos-14` (arm64) и `macos-15-intel` (x86_64): Python 3.12, зависимости, тесты (без окон — offscreen, все — на настоящем оконном сервере раннера: рамка Fluent обращается к окну Cocoa, которого в offscreen нет), сборка, проверка подписи и пробный запуск `.app` на 15 секунд, `.dmg` в Artifacts на 30 дней.
+- Подпись: ad hoc, без Developer ID. Первый запуск через ПКМ → «Открыть» или «Всё равно открыть» в настройках безопасности (macOS 15+). Подпись Developer ID и нотаризация описаны в README, не настроены.
+- `pytest.ini`: тесты берутся только из `tests/` (раньше простой `pytest` из корня собирал и старые копии в `backups/`).
+
+## Что можно проверить только на настоящем Mac
+
+Вид окна (кнопки-«светофор», отступы заголовка, шрифты), ⌘Q и закрытие красной кнопкой (вопрос «Exit?»), метки секрета в буфере (тест `test_real_mac_pasteboard_holds_concealed_secret` выполняется только на Mac — в CI), открытие неподписанного `.app`, скачанного из интернета, через Gatekeeper.
+
+## Тесты
+
+`python -m pytest` (`QT_QPA_PLATFORM=offscreen`): **263 passed, 1 skipped** (пропущен тест, который выполняется только на настоящем Mac) (236 прежних и новые в `tests/test_platform.py`: папка данных на Windows/macOS/Linux, права 0600/0700 на Mac и их отсутствие на Windows, хранилище и копия с правами владельца, папка сохранения, горячие клавиши и подписи ⌘, шрифты, буфер обмена Mac с запасным путём через Qt, иконка для `.icns`).

@@ -18,6 +18,7 @@ from qfluentwidgets import (ListWidget, ListItemDelegate, SearchLineEdit, PushBu
                             FluentIcon, setCustomStyleSheet)
 from ui import theme
 from ui.icons import AppIcon
+from platform_utils import shortcut_label
 
 ENTRY_ROLE = Qt.UserRole + 1   # dict with what the list shows (never the password itself)
 
@@ -346,7 +347,7 @@ class VaultPage(QWidget):
         self.view_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         top.addWidget(self.view_title, 1)
         self.search_input = SearchLineEdit()
-        self.search_input.setPlaceholderText("Search passwords   (Ctrl+F)")
+        self.search_input.setPlaceholderText(f"Search passwords   ({shortcut_label('Ctrl+F')})")
         self.search_input.setFixedWidth(300)
         top.addWidget(self.search_input)
         self.add_button = theme.primary_button("New password", FluentIcon.ADD)

@@ -15,6 +15,8 @@ from ui.layout_utils import resize_to_fit_screen
 from ui.password_generator_dialog import GeneratorPage
 from ui.settings_page import SettingsPage
 from ui.vault_page import VaultPage
+from platform_utils import default_save_path, restrict_file, shortcut_keys
+from version import __version__
 
 VIEW_TITLES = {
     "all": "All passwords",
@@ -237,24 +239,28 @@ class MainWindow(FluentWindow):
         self.nav_items["lock"] = lock_item
 
     def create_shortcuts(self):
-        """Keyboard shortcuts of the former menu bar"""
-        shortcuts = [
-            ("Ctrl+N", self.show_add_password_dialog),
-            ("Ctrl+F", self.focus_search),
-            ("Ctrl+G", self.show_generator_dialog),
-            ("Ctrl+L", self.lock_vault),
-            ("Ctrl+Q", self.close),
-            ("F5", self.refresh_data),
-        ]
+        """Keyboard shortcuts of the former menu bar ("Ctrl" is the Command key on macOS)"""
+        slots = {
+            "add": self.show_add_password_dialog,
+            "search": self.focus_search,
+            "generator": self.show_generator_dialog,
+            "lock": self.lock_vault,
+            "quit": self.close,
+            "refresh": self.refresh_data,
+        }
+        keys = shortcut_keys()
         self.shortcuts = []
-        for keys, slot in shortcuts:
-            shortcut = QShortcut(QKeySequence(keys), self)
-            shortcut.activated.connect(slot)
-            self.shortcuts.append(shortcut)
-        delete = QShortcut(QKeySequence(Qt.Key_Delete), self.entry_list)
-        delete.setContext(Qt.WidgetShortcut)
-        delete.activated.connect(lambda: self.selected_password_id and self.delete_password(self.selected_password_id))
-        self.shortcuts.append(delete)
+        for action, slot in slots.items():
+            for sequence in keys[action]:
+                shortcut = QShortcut(QKeySequence(sequence), self)
+                shortcut.activated.connect(slot)
+                self.shortcuts.append(shortcut)
+        for sequence in keys["delete"]:
+            delete = QShortcut(QKeySequence(sequence), self.entry_list)
+            delete.setContext(Qt.WidgetShortcut)
+            delete.activated.connect(
+                lambda: self.selected_password_id and self.delete_password(self.selected_password_id))
+            self.shortcuts.append(delete)
 
     def paintEvent(self, e):
         painter = QPainter(self)
@@ -785,7 +791,7 @@ class MainWindow(FluentWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Passwords",
-            f"passwords_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            default_save_path(f"passwords_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"),
             "CSV Files (*.csv)"
         )
 
@@ -795,6 +801,8 @@ class MainWindow(FluentWindow):
                 passwords = self.app.password_manager.get_all_passwords(self.user_id)
 
                 with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                    # Plain-text passwords: owner-only file on macOS/Linux (no-op on Windows)
+                    restrict_file(file_path)
                     writer = csv.writer(f)
                     writer.writerow(['Title', 'Username', 'Password', 'URL', 'Notes', 'Strength', 'Favorite'])
 
@@ -901,7 +909,7 @@ class MainWindow(FluentWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Create Backup",
-            f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+            default_save_path(f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"),
             "Database Files (*.db)"
         )
 
@@ -1015,7 +1023,7 @@ class MainWindow(FluentWindow):
         QMessageBox.about(
             self,
             "About Password Manager",
-            "<h2>Password Manager v1.3</h2>"
+            f"<h2>Password Manager v{__version__}</h2>"
             "<p>A secure, local password management application.</p>"
             "<h3>Features:</h3>"
             "<ul>"

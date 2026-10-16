@@ -14,6 +14,8 @@ import shutil
 import sqlite3
 import logging
 
+from platform_utils import restrict_dir, restrict_file
+
 logger = logging.getLogger(__name__)
 
 APP_DIR_NAME = "SecureVault"
@@ -24,17 +26,26 @@ LOG_FILE_NAME = "error.log"
 DB_PATH_ENV = "PASSWORD_VAULT_DB"
 
 
+def get_data_base_dir() -> str:
+    """The system's folder for per-user application data:
+    Windows:  %APPDATA%  (AppData/Roaming in the user's profile)
+    macOS:    ~/Library/Application Support
+    Linux:    $XDG_DATA_HOME or ~/.local/share
+    """
+    home = os.path.expanduser("~")
+    if sys.platform == "win32":
+        return os.environ.get("APPDATA") or home
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support")
+    return os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+
+
 def get_data_dir() -> str:
     """Per-user folder for the vault and the log, created if missing"""
-    if sys.platform == "win32":
-        base = os.environ.get("APPDATA") or os.path.expanduser("~")
-    elif sys.platform == "darwin":
-        base = os.path.expanduser("~/Library/Application Support")
-    else:
-        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-
-    path = os.path.join(base, APP_DIR_NAME)
+    path = os.path.join(get_data_base_dir(), APP_DIR_NAME)
     os.makedirs(path, exist_ok=True)
+    # Only the owner may open the folder on macOS/Linux (no-op on Windows)
+    restrict_dir(path)
     return path
 
 
@@ -81,6 +92,7 @@ def get_db_path() -> str:
         if os.path.exists(candidate) and _has_account(candidate):
             # Copy rather than move, so the old file stays as a fallback
             shutil.copy2(candidate, db_path)
+            restrict_file(db_path)
             logger.warning(f"Copied existing vault from {candidate} to {db_path}")
             break
 
