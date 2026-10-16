@@ -1,2 +1,4 @@
 # Packaging the macOS app (see build_macos.sh); not needed to run the program
 pyinstaller==6.19.0
+# The .dmg window with a background picture and icon positions
+dmgbuild==1.6.7

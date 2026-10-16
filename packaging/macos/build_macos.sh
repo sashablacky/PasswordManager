@@ -87,28 +87,43 @@ else
 fi
 codesign --verify --deep --strict "$APP"
 
-# .dmg with the app and a link to /Applications, so it can be dragged across
+# .dmg with the app, a link to /Applications and the first-start notes
 DMG="dist/PasswordManager-$VERSION-macOS-$MAC_KIND.dmg"
-STAGING="$(mktemp -d)"
-# ditto keeps symlinks, permissions and extended attributes, so the signature stays valid
-ditto "$APP" "$STAGING/$APP_NAME.app"
-ln -s /Applications "$STAGING/Applications"
-# Step-by-step first start in large type, next to the app
-python packaging/macos/make_first_launch_rtf.py "$STAGING/Как открыть в первый раз.rtf"
+NOTES_DIR="$(mktemp -d)"
+NOTES="$NOTES_DIR/Как открыть в первый раз.rtf"
+# Step-by-step first start in large type
+python packaging/macos/make_first_launch_rtf.py "$NOTES"
 rm -f "$DMG"
-# hdiutil now and then fails with "Resource busy" (known on CI Macs): retry
-for attempt in 1 2 3; do
-    if hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG"; then
-        break
-    fi
-    if [[ $attempt -eq 3 ]]; then
-        echo "hdiutil failed three times" >&2
-        exit 1
-    fi
-    echo "hdiutil failed, retrying in 10 s..." >&2
-    sleep 10
-done
-rm -rf "$STAGING"
+
+# Preferred: dmgbuild, which lays out the window (background arrow "drag onto
+# Applications", icon positions). If it fails, a plain .dmg with the same files.
+if python -m dmgbuild -s packaging/macos/dmg_settings.py \
+        -D app="$APP" -D notes="$NOTES" -D background=packaging/macos/dmg-background.png \
+        "$APP_NAME" "$DMG"; then
+    echo "dmg laid out with dmgbuild"
+else
+    echo "dmgbuild failed, making a plain .dmg" >&2
+    rm -f "$DMG"
+    STAGING="$(mktemp -d)"
+    # ditto keeps symlinks, permissions and extended attributes, so the signature stays valid
+    ditto "$APP" "$STAGING/$APP_NAME.app"
+    ln -s /Applications "$STAGING/Applications"
+    cp "$NOTES" "$STAGING/"
+    # hdiutil now and then fails with "Resource busy" (known on CI Macs): retry
+    for attempt in 1 2 3; do
+        if hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG"; then
+            break
+        fi
+        if [[ $attempt -eq 3 ]]; then
+            echo "hdiutil failed three times" >&2
+            exit 1
+        fi
+        echo "hdiutil failed, retrying in 10 s..." >&2
+        sleep 10
+    done
+    rm -rf "$STAGING"
+fi
+rm -rf "$NOTES_DIR"
 
 echo
 echo "Built: $APP"

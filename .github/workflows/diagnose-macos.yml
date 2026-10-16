@@ -25,7 +25,7 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 30
     env:
-      DMG_URL: ${{ inputs.dmg_url || 'https://github.com/sashablacky/PasswordManager/releases/download/v1.5.2/PasswordManager-1.5.2-macOS-Intel.dmg' }}
+      DMG_URL: ${{ inputs.dmg_url || 'https://github.com/sashablacky/PasswordManager/releases/download/v1.5.3/PasswordManager-1.5.3-macOS-Intel.dmg' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -34,7 +34,8 @@ jobs:
           set +e
           R=report.txt
           section() { printf '\n===== %s =====\n' "$1" >> $R; }
-          run() { echo "\$ $*" >> $R; "$@" >> $R 2>&1; echo "[exit $?]" >> $R; }
+          # Every command gets at most 60 s, so one stuck command cannot eat the whole job
+          run() { echo "\$ $*" >> $R; perl -e 'alarm 60; exec @ARGV' "$@" >> $R 2>&1; echo "[exit $?]" >> $R; }
 
           section "system"
           run sw_vers
@@ -52,7 +53,7 @@ jobs:
           run ls -la /tmp/pmdmg
           APP_IN_DMG="/tmp/pmdmg/Password Manager.app"
           run xattr -lr "$APP_IN_DMG/Contents/Info.plist"
-          run codesign --verify --deep --strict --verbose=4 "$APP_IN_DMG"
+          run codesign --verify --deep --strict --verbose=1 "$APP_IN_DMG"
           run codesign -dvvv "$APP_IN_DMG"
           run spctl -a -vv -t exec "$APP_IN_DMG"
 
@@ -63,7 +64,7 @@ jobs:
           # Finder gives the copy the quarantine of the download
           xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" "$APP"
           run xattr -l "$APP"
-          run codesign --verify --deep --strict --verbose=4 "$APP"
+          run codesign --verify --deep --strict --verbose=1 "$APP"
           run spctl -a -vv -t exec "$APP"
           run plutil -p "$APP/Contents/Info.plist"
           run ls -l "$APP/Contents/MacOS"
@@ -76,8 +77,8 @@ jobs:
           run pgrep -lf "Password Manager.app/Contents/MacOS"
           pkill -f "Password Manager.app/Contents/MacOS"
           echo "--- syspolicyd / Gatekeeper log ---" >> $R
-          log show --start "$START" --style compact \
-            --predicate 'process == "syspolicyd" OR process == "XprotectService" OR eventMessage CONTAINS[c] "Password Manager"' \
+          perl -e 'alarm 120; exec @ARGV' log show --start "$START" --style compact \
+            --predicate 'process == "syspolicyd" OR process == "XprotectService" OR process == "amfid" OR eventMessage CONTAINS[c] "Password Manager"' \
             2>/dev/null | tail -n 60 >> $R
 
           section "start after removing quarantine, through Launch Services"
@@ -93,7 +94,7 @@ jobs:
           pkill -f "Password Manager.app/Contents/MacOS"
           sleep 2
           echo "--- system log ---" >> $R
-          log show --start "$START" --style compact \
+          perl -e 'alarm 120; exec @ARGV' log show --start "$START" --style compact \
             --predicate 'eventMessage CONTAINS[c] "Password Manager" OR process == "Password Manager"' \
             2>/dev/null | tail -n 40 >> $R
 

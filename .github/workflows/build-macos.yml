@@ -104,7 +104,19 @@ jobs:
           hdiutil attach -nobrowse -readonly -mountpoint /tmp/pmdmg "$DMG"
           ls -la /tmp/pmdmg
           test -f "/tmp/pmdmg/Как открыть в первый раз.rtf"
+          if [ -f /tmp/pmdmg/.DS_Store ] && [ -d /tmp/pmdmg/.background ]; then
+            echo "Window layout and background present"
+          else
+            echo "::warning title=dmg layout::no background/layout (dmgbuild fallback was used)"
+          fi
           codesign --verify --deep --strict --verbose=2 "/tmp/pmdmg/Password Manager.app"
+          # The signature must name the bundle and seal its Info.plist, or macOS may
+          # not keep the "Open Anyway" approval for it
+          SIG=$(codesign -dvvv "/tmp/pmdmg/Password Manager.app" 2>&1)
+          echo "$SIG"
+          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw "/tmp/pmdmg/Password Manager.app/Contents/Info.plist")
+          echo "$SIG" | grep -qx "Identifier=$BUNDLE_ID" || { echo "::error::signature identifier is not $BUNDLE_ID"; exit 1; }
+          echo "$SIG" | grep -q "^Info.plist entries=" || { echo "::error::Info.plist is not bound to the signature"; exit 1; }
           mkdir -p "$HOME/Applications"
           rm -rf "$HOME/Applications/Password Manager.app"
           ditto "/tmp/pmdmg/Password Manager.app" "$HOME/Applications/Password Manager.app"
