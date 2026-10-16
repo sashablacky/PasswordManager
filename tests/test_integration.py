@@ -10,9 +10,9 @@ import os
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.database.db_manager import DatabaseManager
-from src.security.encryption import EncryptionEngine
-from src.security.kdf import KeyDerivationFunction
+from database.db_manager import DatabaseManager
+from security.encryption import EncryptionEngine
+from security.kdf import KeyDerivationFunction
 
 
 @pytest.fixture
@@ -222,7 +222,7 @@ class TestCompleteFlow:
         # Try to decrypt
         result = db.fetch_one("SELECT * FROM passwords WHERE password_id = ?", (1,))
 
-        from src.security.encryption import DecryptionError
+        from security.encryption import DecryptionError
         with pytest.raises(DecryptionError):
             encryption.decrypt(result['encrypted_password'])
 
@@ -359,7 +359,7 @@ class TestSecurityScenarios:
         encryption.clear_key()
 
         # Try to decrypt without key
-        from src.security.encryption import DecryptionError
+        from security.encryption import DecryptionError
         with pytest.raises(DecryptionError, match="key not set"):
             encryption.decrypt(encrypted)
 
@@ -398,7 +398,7 @@ class TestSecurityScenarios:
         # User 2 cannot decrypt with their key
         encryption.set_key(key2)
 
-        from src.security.encryption import DecryptionError
+        from security.encryption import DecryptionError
         with pytest.raises(DecryptionError):
             encryption.decrypt(encrypted1)
 

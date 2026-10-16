@@ -9,6 +9,8 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
 from security.generator import PasswordGenerator, GeneratorOptions
+from ui.clipboard import copy_secret
+from ui.layout_utils import set_scrollable_layout
 
 
 class PasswordGeneratorDialog(QDialog):
@@ -24,13 +26,16 @@ class PasswordGeneratorDialog(QDialog):
         super().__init__()
         self.generator = generator or PasswordGenerator()
         self.current_password = ""
+        self.copied = False  # True once the user copied a password to the clipboard
         self.setup_ui()
         self.generate_password()
 
     def setup_ui(self):
         """Setup the user interface"""
         self.setWindowTitle("Password Generator")
-        self.setFixedSize(1000, 1000)
+        # Fits small laptop screens (1366x768); the user can still enlarge it
+        self.setMinimumSize(560, 680)
+        self.resize(640, 720)
         self.setStyleSheet("""
             QDialog {
                 background-color: #f5f7fa;
@@ -254,9 +259,8 @@ class PasswordGeneratorDialog(QDialog):
             }
         """)
         close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn, alignment=Qt.AlignCenter)
-
-        self.setLayout(layout)
+        # Scrollable options with the Close button always visible (fits small screens)
+        set_scrollable_layout(self, layout, close_btn, Qt.AlignCenter)
 
     def generate_password(self):
         """Generate a new password based on current options"""
@@ -268,6 +272,12 @@ class PasswordGeneratorDialog(QDialog):
             self.symbols_cb.isChecked()
         ]):
             QMessageBox.warning(self, "Warning", "Select at least one character type")
+            # Undo the click that left no character types selected
+            sender = self.sender()
+            if isinstance(sender, QCheckBox):
+                sender.blockSignals(True)
+                sender.setChecked(True)
+                sender.blockSignals(False)
             return
 
         options = GeneratorOptions(
@@ -331,9 +341,10 @@ class PasswordGeneratorDialog(QDialog):
     def copy_to_clipboard(self):
         """Copy current password to clipboard"""
         if self.current_password:
-            clipboard = QApplication.clipboard()
-            clipboard.setText(self.current_password)
-            QMessageBox.information(self, "Copied", "Password copied to clipboard!")
+            copy_secret(self.current_password)
+            self.copied = True
+            QMessageBox.information(self, "Copied", "Password copied to clipboard!\n"
+                                                    "It will be cleared in 30 seconds.")
 
 
 if __name__ == '__main__':

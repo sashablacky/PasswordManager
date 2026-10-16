@@ -8,7 +8,9 @@ from PyQt5.QtGui import QFont, QColor, QPalette
 
 from security.breach_detector import BreachDetector
 from database.db_manager import DatabaseManager
-from security.encryption import EncryptionEngine
+from security.encryption import EncryptionEngine, wipe
+from ui.clipboard import copy_secret
+from ui.layout_utils import resize_to_fit_screen
 import logging
 import json
 
@@ -20,41 +22,45 @@ class BreachCheckThread(QThread):
 
     progress = pyqtSignal(int, int)  # current, total
     result_ready = pyqtSignal(object)  # breach result
-    finished = pyqtSignal()
     error = pyqtSignal(str)
+    # QThread's own `finished` signal is emitted when run() returns, success or not
 
-    def __init__(self, user_id, encryption_key, db_path='password_vault.db'):
+    def __init__(self, user_id, encryption_key, db_path, bind_records=True):
         """
         Initialize breach check thread
 
         Args:
             user_id: User ID to check passwords for
-            encryption_key: Encryption key for decrypting passwords
+            encryption_key: A copy of the encryption key (bytearray); wiped when the thread ends
             db_path: Path to database file
+            bind_records: Vault format flag of the main encryption engine
         """
         super().__init__()
         self.user_id = user_id
         self.encryption_key = encryption_key
         self.db_path = db_path
+        self.bind_records = bind_records
 
     def run(self):
         """Run the breach check in background thread"""
         db = None
+        encryption = EncryptionEngine()
         try:
             # Create new database connection for this thread
             db = DatabaseManager(self.db_path)
             db.connect()
 
             # Create encryption engine with the key
-            encryption = EncryptionEngine()
             encryption.set_key(self.encryption_key)
+            encryption.bind_records = self.bind_records
+            wipe(self.encryption_key)
 
             # Create password manager with thread-local instances
             from managers.password_manager import PasswordManager
             password_manager = PasswordManager(db, encryption)
 
-            # Create breach detector with thread-local db
-            detector = BreachDetector(db)
+            # Create breach detector with thread-local db (results are stored encrypted)
+            detector = BreachDetector(db, encryption)
 
             # Get all passwords
             passwords = password_manager.get_all_passwords(self.user_id)
@@ -76,11 +82,14 @@ class BreachCheckThread(QThread):
                     'breach_count': assessment.get('breach_count', 0),
                     'sources': assessment.get('sources', []),
                     'recommendations': assessment['recommendations'],
-                    'issues': assessment['issues']
+                    'issues': assessment['issues'],
+                    'check_failed': assessment.get('check_failed', False)
                 })
 
                 # Store in database using thread-local connection
-                detector._store_breach_result(self.user_id, pwd.password_id, assessment)
+                # (keep the previous result if the online check failed)
+                if not assessment.get('check_failed'):
+                    detector._store_breach_result(self.user_id, pwd.password_id, assessment)
 
             self.result_ready.emit(results)
 
@@ -89,10 +98,11 @@ class BreachCheckThread(QThread):
             self.error.emit(str(e))
 
         finally:
+            wipe(self.encryption_key)
+            encryption.clear_key()
             # Close thread-local database connection
             if db:
                 db.disconnect()
-            self.finished.emit()
 
 
 class BreachDialog(QDialog):
@@ -102,10 +112,11 @@ class BreachDialog(QDialog):
         super().__init__(parent)
         self.password_manager = password_manager
         self.user_id = user_id
-        self.encryption_key = password_manager.encryption._key  # Get the encryption key
         self.db_path = password_manager.db.db_path
-        self.detector = BreachDetector(password_manager.db)  # Main thread detector for UI
+        # Main thread detector for UI (reads the encrypted stored results)
+        self.detector = BreachDetector(password_manager.db, password_manager.encryption)
         self.breach_results = []
+        self.check_thread = None
 
         self.setup_ui()
         self.load_previous_results()
@@ -113,7 +124,9 @@ class BreachDialog(QDialog):
     def setup_ui(self):
         """Setup the user interface"""
         self.setWindowTitle("🔒 Password Breach Detection")
-        self.setMinimumSize(1000, 700)
+        # Must fit a 1366x768 screen with the taskbar (the old 1000x700 minimum did not)
+        self.setMinimumSize(860, 560)
+        resize_to_fit_screen(self, 1000, 700)
         self.setStyleSheet("""
             QDialog {
                 background-color: #f5f7fa;
@@ -457,10 +470,9 @@ class BreachDialog(QDialog):
 
         return widget
 
-    def load_previous_results(self):
-        """Load previous breach check results from database"""
+    def load_statistics(self):
+        """Refresh the statistics cards from the stored results"""
         try:
-            # Get statistics
             stats = self.detector.get_breach_statistics(self.user_id)
 
             self.total_card.findChild(QLabel).setText(str(stats['total_checked']))
@@ -473,7 +485,13 @@ class BreachDialog(QDialog):
                     self.last_check_label.setText(f"Last check: {stats['last_check'].strftime('%Y-%m-%d %H:%M')}")
                 else:
                     self.last_check_label.setText(f"Last check: {stats['last_check']}")
+        except Exception as e:
+            logger.error(f"Failed to load breach statistics: {e}")
 
+    def load_previous_results(self):
+        """Load previous breach check results from database"""
+        self.load_statistics()
+        try:
             # Get compromised passwords
             compromised = self.detector.get_compromised_passwords(self.user_id)
 
@@ -542,7 +560,10 @@ class BreachDialog(QDialog):
             self.results_table.setItem(row, 2, count_item)
 
             # Status
-            if result['breach_found']:
+            if result.get('check_failed'):
+                status = "❔ NOT CHECKED"
+                status_color = QColor("#7f8c8d")
+            elif result['breach_found']:
                 status = "⚠️ COMPROMISED"
                 status_color = QColor("#e74c3c")
             else:
@@ -584,16 +605,18 @@ class BreachDialog(QDialog):
         self.results_table.setRowCount(0)
 
         # Start background thread with thread-local database connection
-        self.thread = BreachCheckThread(
+        encryption = self.password_manager.encryption
+        self.check_thread = BreachCheckThread(
             self.user_id,
-            self.encryption_key,
-            self.db_path
+            encryption.copy_key(),
+            self.db_path,
+            encryption.bind_records
         )
-        self.thread.progress.connect(self.update_progress)
-        self.thread.result_ready.connect(self.on_results_ready)
-        self.thread.finished.connect(self.on_check_finished)
-        self.thread.error.connect(self.on_check_error)
-        self.thread.start()
+        self.check_thread.progress.connect(self.update_progress)
+        self.check_thread.result_ready.connect(self.on_results_ready)
+        self.check_thread.finished.connect(self.on_check_finished)
+        self.check_thread.error.connect(self.on_check_error)
+        self.check_thread.start()
 
     def update_progress(self, current, total):
         """Update progress bar"""
@@ -606,17 +629,28 @@ class BreachDialog(QDialog):
         self.breach_results = results
         self.display_results(results)
 
-        # Refresh statistics
-        self.load_previous_results()
+        # Refresh statistics only, so the full results stay in the table
+        self.load_statistics()
+
+        not_checked = sum(1 for r in results if r.get('check_failed'))
+        if results and not_checked == len(results):
+            QMessageBox.warning(self, "Check Incomplete",
+                                "Could not reach the online breach database (haveibeenpwned.com).\n"
+                                "Check your internet connection and try again.\n\n"
+                                "Only local weakness checks were performed.")
+        elif not_checked:
+            QMessageBox.warning(self, "Check Incomplete",
+                                f"Breach check finished, but {not_checked} of {len(results)} passwords "
+                                "could not be checked online. Please try again later.")
+        else:
+            QMessageBox.information(self, "Check Complete",
+                                    "Breach check completed successfully!")
 
     def on_check_finished(self):
-        """Handle check completion"""
+        """Reset the UI when the background check ends (success or error)"""
         self.check_btn.setEnabled(True)
         self.check_btn.setText("🔄 Check Now")
         self.progress_group.setVisible(False)
-
-        QMessageBox.information(self, "Check Complete",
-                               "Breach check completed successfully!")
 
     def on_check_error(self, error_msg):
         """Handle check error"""
@@ -686,9 +720,8 @@ class BreachDialog(QDialog):
         try:
             pwd = self.password_manager.get_password(password_id, self.user_id)
 
-            # Copy to clipboard
-            clipboard = QApplication.clipboard()
-            clipboard.setText(pwd.password)
+            # Copy to clipboard (cleared after 30 seconds or on exit)
+            copy_secret(pwd.password)
 
             # Show tooltip feedback
             cursor_pos = self.mapToGlobal(self.rect().center())
@@ -703,23 +736,36 @@ class BreachDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to copy password:\n{str(e)}")
 
     def change_password(self, password_id):
-        """Prompt user to change password"""
-        reply = QMessageBox.question(
-            self,
-            "Change Password",
-            "Would you like to generate a strong new password for this account?",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        """Open the edit dialog so the user can generate and save a new password"""
+        try:
+            from ui.add_password_dialog import AddPasswordDialog
 
-        if reply == QMessageBox.Yes:
-            # Open password generator
-            from ui.password_generator_dialog import PasswordGeneratorDialog
-            dialog = PasswordGeneratorDialog()
+            pwd = self.password_manager.get_password(password_id, self.user_id)
+            categories = self.password_manager.db.fetch_all(
+                "SELECT * FROM categories WHERE user_id = ? ORDER BY sort_order",
+                (self.user_id,)
+            )
+
+            QMessageBox.information(
+                self,
+                "Change Password",
+                "Change the password on the website first, then use \"🎲 Generate\" "
+                "in the next window (or type the new password) and click OK to save it here."
+            )
+
+            dialog = AddPasswordDialog(self.password_manager, self.user_id, categories, pwd)
             if dialog.exec_() == QDialog.Accepted:
-                # Password was generated and copied to clipboard
-                QMessageBox.information(
-                    self,
-                    "Password Generated",
-                    "A new password has been generated and copied to your clipboard.\n"
-                    "Please update it in your account settings."
-                )
+                self.status_note(f"Password for '{pwd.title}' updated. Run the check again to re-test it.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to change password:\n{str(e)}")
+
+    def status_note(self, text):
+        QToolTip.showText(self.mapToGlobal(self.rect().center()), text, self, msecShowTime=3000)
+
+    def done(self, result):
+        # Closing the dialog while the check is running would destroy a running QThread
+        # (which crashes the app), so wait for it to finish first
+        if self.check_thread is not None and self.check_thread.isRunning():
+            self.check_thread.wait()
+        super().done(result)

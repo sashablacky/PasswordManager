@@ -10,7 +10,7 @@ import time
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.security.kdf import KeyDerivationFunction, KDFError
+from security.kdf import KeyDerivationFunction, KDFError
 
 
 @pytest.fixture

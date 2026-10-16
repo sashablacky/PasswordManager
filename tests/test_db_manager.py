@@ -10,9 +10,9 @@ import time
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.database.db_manager import DatabaseManager
-from src.security.encryption import EncryptionEngine
-from src.managers.auth_manager import AuthenticationManager, AuthenticationError
+from database.db_manager import DatabaseManager
+from security.encryption import EncryptionEngine, record_aad
+from managers.auth_manager import AuthenticationManager, AuthenticationError
 
 
 @pytest.fixture
@@ -54,10 +54,10 @@ class TestAccountCreation:
 
         weak_passwords = [
             "short",  # Too short
-            "nouppercase123!",  # No uppercase
-            "NOLOWERCASE123!",  # No lowercase
-            "NoNumbers!",  # No numbers
-            "NoSpecialChar123"  # No special chars
+            "Passw0rd!",  # Too short (was accepted by the old 8-character rule)
+            "onlylowercase",  # One kind of character, shorter than 16
+            "MyPassword2024!",  # Built on a well-known weak password
+            "aaaaaaaaaaaaaaaaaaaa",  # Repeated characters
         ]
 
         for password in weak_passwords:
@@ -275,8 +275,8 @@ class TestPasswordChange:
         """Test successful password change"""
         db, encryption, auth = setup
 
-        old_pass = "OldPass123!"
-        new_pass = "NewPass456!"
+        old_pass = "OldPass1234!"
+        new_pass = "NewPass4567!"
 
         auth.create_account(old_pass)
         auth.authenticate(old_pass)
@@ -297,7 +297,7 @@ class TestPasswordChange:
         auth.create_account("CorrectPass123!")
         auth.authenticate("CorrectPass123!")
 
-        success, msg = auth.change_master_password("WrongPass123!", "NewPass456!")
+        success, msg = auth.change_master_password("WrongPass123!", "NewPass4567!")
 
         assert success is False
         assert "incorrect" in msg.lower()
@@ -306,7 +306,7 @@ class TestPasswordChange:
         """Test password change with weak new password"""
         db, encryption, auth = setup
 
-        old_pass = "OldPass123!"
+        old_pass = "OldPass1234!"
         auth.create_account(old_pass)
         auth.authenticate(old_pass)
 
@@ -318,31 +318,35 @@ class TestPasswordChange:
         """Test that password change re-encrypts existing passwords"""
         db, encryption, auth = setup
 
-        old_pass = "OldPass123!"
-        new_pass = "NewPass456!"
+        old_pass = "OldPass1234!"
+        new_pass = "NewPass4567!"
 
         # Create account and add password
         auth.create_account(old_pass)
         auth.authenticate(old_pass)
 
-        # Store encrypted password
+        # Store encrypted password (bound to its entry, as the app stores it)
         test_password = "MySecretPassword"
-        encrypted = encryption.encrypt(test_password)
-        db.execute_query(
+        cursor = db.execute_query(
             "INSERT INTO passwords (user_id, encrypted_password) VALUES (?, ?)",
-            (auth.get_current_user_id(), encrypted)
+            (auth.get_current_user_id(), b"")
         )
+        pid = cursor.lastrowid
+        encrypted = encryption.encrypt(test_password, record_aad(encryption, pid, "encrypted_password"))
+        db.execute_query("UPDATE passwords SET encrypted_password = ? WHERE password_id = ?", (encrypted, pid))
 
         # Change password
-        auth.change_master_password(old_pass, new_pass)
+        success, msg = auth.change_master_password(old_pass, new_pass)
+        assert success, msg
 
         # Logout and login with new password
         auth.logout()
-        auth.authenticate(new_pass)
+        assert auth.authenticate(new_pass)[0]
 
         # Should be able to decrypt with new key
         result = db.fetch_one("SELECT encrypted_password FROM passwords")
-        decrypted = encryption.decrypt(result['encrypted_password'])
+        decrypted = encryption.decrypt(result['encrypted_password'],
+                                       record_aad(encryption, pid, "encrypted_password"))
 
         assert decrypted == test_password
 
@@ -354,46 +358,52 @@ class TestPasswordStrengthValidation:
         """Test password too short"""
         db, encryption, auth = setup
 
-        success, msg = auth.create_account("Short1!")
+        success, msg = auth.create_account("Short1!abc")
 
         assert success is False
-        assert "at least 8 characters" in msg.lower()
+        assert "at least 12 characters" in msg.lower()
 
-    def test_password_no_uppercase(self, setup):
-        """Test password without uppercase"""
+    def test_password_too_few_character_kinds(self, setup):
+        """Short password with only two kinds of characters"""
         db, encryption, auth = setup
 
-        success, msg = auth.create_account("nouppercase123!")
+        success, msg = auth.create_account("nouppercase123")
 
         assert success is False
-        assert "uppercase" in msg.lower()
+        assert "at least 16 characters" in msg.lower()
 
-    def test_password_no_lowercase(self, setup):
-        """Test password without lowercase"""
+    def test_three_kinds_without_special_is_accepted(self, setup):
+        """A special character is no longer required"""
         db, encryption, auth = setup
 
-        success, msg = auth.create_account("NOLOWERCASE123!")
+        success, msg = auth.create_account("NoSpecial1234")
 
-        assert success is False
-        assert "lowercase" in msg.lower()
+        assert success is True, msg
 
-    def test_password_no_number(self, setup):
-        """Test password without number"""
+    def test_long_passphrase_is_accepted(self, setup):
+        """A long passphrase of lowercase words is enough"""
         db, encryption, auth = setup
 
-        success, msg = auth.create_account("NoNumbers!")
+        success, msg = auth.create_account("correct horse battery staple")
 
-        assert success is False
-        assert "number" in msg.lower()
+        assert success is True, msg
 
-    def test_password_no_special(self, setup):
-        """Test password without special character"""
+    def test_common_password_is_rejected(self, setup):
+        """Passwords built around well-known weak passwords"""
         db, encryption, auth = setup
 
-        success, msg = auth.create_account("NoSpecial123")
+        success, msg = auth.create_account("Qwerty123456!")
 
         assert success is False
-        assert "special character" in msg.lower()
+        assert "commonly used" in msg.lower()
+
+    def test_repeated_characters_are_rejected(self, setup):
+        db, encryption, auth = setup
+
+        success, msg = auth.create_account("Aa1!Aa1!Aa1!Aa1!")
+
+        assert success is False
+        assert "repeated" in msg.lower()
 
 
 class TestSessionManagement:
@@ -467,9 +477,9 @@ class TestAuditLogging:
         """Test password change is logged"""
         db, encryption, auth = setup
 
-        auth.create_account("OldPass123!")
-        auth.authenticate("OldPass123!")
-        auth.change_master_password("OldPass123!", "NewPass456!")
+        auth.create_account("OldPass1234!")
+        auth.authenticate("OldPass1234!")
+        auth.change_master_password("OldPass1234!", "NewPass4567!")
 
         logs = db.fetch_all("SELECT * FROM audit_log WHERE action_type = 'PASSWORD_CHANGED'")
 

@@ -9,6 +9,8 @@ from PyQt5.QtGui import QIcon, QFont, QColor, QPalette
 
 from ui.add_password_dialog import AddPasswordDialog
 from ui.password_generator_dialog import PasswordGeneratorDialog
+from ui.clipboard import copy_secret, CLIPBOARD_CLEAR_SECONDS
+from ui.layout_utils import resize_to_fit_screen
 
 
 class MainWindow(QMainWindow):
@@ -26,31 +28,28 @@ class MainWindow(QMainWindow):
         self.user_id = app_instance.auth_manager.get_current_user_id()
         self.current_category = None
         self.current_view = "all"  # all, favorites, weak, recent
+        self.strength_filter = "All"  # All, Strong, Medium, Weak
+        self._skip_close_prompt = False
+
+        # The table is refreshed after every change made in the app, so no periodic
+        # auto-refresh is needed (it used to reset the search results every 30 s).
+        # User activity for auto-lock is tracked by the app-wide ActivityMonitor in main.py.
 
         self.setup_ui()
         self.load_categories()
         self.load_passwords()
 
-        # Auto-refresh timer (every 30 seconds)
-        self.refresh_timer = QTimer()
-        self.refresh_timer.timeout.connect(self.refresh_data)
-        self.refresh_timer.start(30000)  # 30 seconds
-
-        # Install event filter for auto-lock
-        self.installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        """Handle events for auto-lock"""
-        # Reset auto-lock timer on user activity
-        if event.type() in [event.MouseButtonPress, event.KeyPress, event.MouseMove]:
-            self.app.reset_auto_lock()
-        return super().eventFilter(obj, event)
+        if self.app.auth_manager.upgrade_error:
+            self.status_label.setText(
+                "⚠️ The vault could not be converted to the new storage format "
+                "(an entry could not be decrypted). It keeps working in the old format."
+            )
 
     def setup_ui(self):
         """Set up the user interface"""
         self.setWindowTitle("Password Manager")
-        self.setGeometry(100, 100, 1400, 800)
         self.setMinimumSize(1000, 600)
+        resize_to_fit_screen(self, 1400, 800)
 
         # Create central widget
         central_widget = QWidget()
@@ -341,7 +340,6 @@ class MainWindow(QMainWindow):
 
         # Quick stats bar
         stats_bar = QHBoxLayout()
-        stats_bar.addWidget(QLabel("🔄 Auto-refresh every 30s"))
         stats_bar.addStretch()
         self.record_count_label = QLabel("0 passwords")
         stats_bar.addWidget(self.record_count_label)
@@ -640,8 +638,13 @@ class MainWindow(QMainWindow):
                 item.setForeground(QColor(cat.get('color', '#667eea')))
                 self.category_list.addItem(item)
 
-            # Select "All Categories"
-            self.category_list.setCurrentRow(0)
+            # Keep the selected category highlighted after a refresh
+            selected_row = 0
+            for row in range(self.category_list.count()):
+                if self.category_list.item(row).data(Qt.UserRole) == self.current_category:
+                    selected_row = row
+                    break
+            self.category_list.setCurrentRow(selected_row)
 
         except Exception as e:
             print(f"Error loading categories: {e}")
@@ -671,8 +674,33 @@ class MainWindow(QMainWindow):
             if self.current_category:
                 passwords = [p for p in passwords if p.category_id == self.current_category]
 
+            # Filter by search text
+            query = self.search_input.text().strip().lower()
+            if query:
+                passwords = [
+                    p for p in passwords
+                    if query in p.title.lower() or query in p.username.lower()
+                    or query in p.url.lower() or query in p.notes.lower()
+                ]
+
+            # Filter by strength
+            if self.strength_filter == "Strong":
+                passwords = [p for p in passwords if p.strength_score >= 75]
+            elif self.strength_filter == "Medium":
+                passwords = [p for p in passwords if 50 <= p.strength_score < 75]
+            elif self.strength_filter == "Weak":
+                passwords = [p for p in passwords if p.strength_score < 50]
+
             self.display_passwords(passwords)
+            if query:
+                self.record_count_label.setText(f"{len(passwords)} results")
             self.update_statistics()
+
+            failures = self.app.password_manager.last_decrypt_failures
+            if failures:
+                self.status_label.setText(
+                    f"⚠️ {failures} entries could not be decrypted (wrong key or damaged data)"
+                )
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load passwords:\n{str(e)}")
@@ -830,18 +858,13 @@ class MainWindow(QMainWindow):
         self.load_passwords()
 
     def on_search(self, text):
-        """Handle search"""
-        if not text:
-            self.load_passwords()
-        else:
-            passwords = self.app.password_manager.search_passwords(self.user_id, text)
-            self.display_passwords(passwords)
-            self.record_count_label.setText(f"{len(passwords)} results")
+        """Handle search (respects the current view, category and strength filter)"""
+        self.load_passwords()
 
     def apply_filter(self, filter_text):
         """Apply strength filter"""
-        # This will be implemented with the current displayed passwords
-        pass
+        self.strength_filter = filter_text
+        self.load_passwords()
 
     def on_table_double_click(self, index):
         """Handle table double-click"""
@@ -853,28 +876,35 @@ class MainWindow(QMainWindow):
         """Refresh all data"""
         self.load_categories()
         self.load_passwords()
-        self.status_label.setText("Refreshed")
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Ready"))
+        if not self.app.password_manager.last_decrypt_failures:
+            self.status_label.setText("Refreshed")
+            self.run_later(2000, lambda: self.status_label.setText("Ready"))
+
+    def run_later(self, msec, callback):
+        """Like QTimer.singleShot, but cancelled if this window is closed (e.g. vault locked)"""
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timer.timeout.connect(timer.deleteLater)
+        timer.start(msec)
 
     def copy_password(self, password_id):
         """Copy password to clipboard"""
         try:
             pwd = self.app.password_manager.get_password(password_id, self.user_id)
 
-            # Copy to clipboard
-            clipboard = QApplication.clipboard()
-            clipboard.setText(pwd.password)
+            # Copy to clipboard (cleared after 30 seconds or on exit)
+            copy_secret(pwd.password)
 
             # Update last used
             self.app.password_manager.update_last_used(password_id, self.user_id)
 
-            self.status_label.setText(f"Password for '{pwd.title}' copied to clipboard")
-
-            # Auto-clear clipboard after 30 seconds
-            QTimer.singleShot(30000, lambda: clipboard.clear() if clipboard.text() == pwd.password else None)
+            self.status_label.setText(
+                f"Password for '{pwd.title}' copied to clipboard (cleared in {CLIPBOARD_CLEAR_SECONDS} s)"
+            )
 
             # Refresh to show updated last used
-            QTimer.singleShot(500, self.refresh_data)
+            self.run_later(500, self.refresh_data)
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to copy password:\n{str(e)}")
@@ -1049,6 +1079,10 @@ class MainWindow(QMainWindow):
         dialog = BreachDialog(self.app.password_manager, self.user_id, self)
         dialog.exec_()
 
+        # Passwords may have been changed from the breach dialog
+        if self.app.auth_manager.is_logged_in():
+            self.refresh_data()
+
     def show_health_check(self):
         """Show password health check"""
         stats = self.app.password_manager.get_statistics(self.user_id)
@@ -1073,10 +1107,32 @@ class MainWindow(QMainWindow):
 
 
     def export_passwords(self):
-        """Export passwords to CSV"""
-        from PyQt5.QtWidgets import QFileDialog
+        """Export passwords to CSV (plain text, so it needs a warning and the master password)"""
+        from PyQt5.QtWidgets import QFileDialog, QInputDialog
         import csv
         from datetime import datetime
+
+        reply = QMessageBox.warning(
+            self,
+            "Export Passwords",
+            "The exported CSV file is NOT encrypted: anyone who gets the file can read "
+            "all your passwords.\n\n"
+            "Keep it only as long as you need it, then delete it.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        master, ok = QInputDialog.getText(
+            self, "Export Passwords", "Enter your master password to export:", QLineEdit.Password
+        )
+        if not ok:
+            return
+        if not self.app.auth_manager.verify_master_password(master):
+            QMessageBox.critical(self, "Error", "Wrong master password. Nothing was exported.")
+            return
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -1085,7 +1141,8 @@ class MainWindow(QMainWindow):
             "CSV Files (*.csv)"
         )
 
-        if file_path:
+        # The vault may have been locked while the file dialog was open
+        if file_path and self.app.auth_manager.is_logged_in():
             try:
                 passwords = self.app.password_manager.get_all_passwords(self.user_id)
 
@@ -1112,7 +1169,6 @@ class MainWindow(QMainWindow):
     def import_passwords(self):
         """Import passwords from CSV"""
         from PyQt5.QtWidgets import QFileDialog
-        import csv
 
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -1121,33 +1177,77 @@ class MainWindow(QMainWindow):
             "CSV Files (*.csv)"
         )
 
-        if file_path:
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
+        if not file_path or not self.app.auth_manager.is_logged_in():
+            return
 
-                    imported = 0
-                    for row in reader:
-                        self.app.password_manager.add_password(
-                            user_id=self.user_id,
-                            title=row.get('Title', ''),
-                            username=row.get('Username', ''),
-                            password=row.get('Password', ''),
-                            url=row.get('URL', ''),
-                            notes=row.get('Notes', '')
-                        )
-                        imported += 1
+        try:
+            imported, skipped = self.import_csv_file(file_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import: {str(e)}")
+            return
 
-                self.refresh_data()
-                QMessageBox.information(self, "Success", f"Imported {imported} passwords")
+        self.refresh_data()
 
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to import: {str(e)}")
+        message = f"Imported {imported} passwords."
+        if skipped:
+            message += f"\n\nSkipped {len(skipped)} rows:\n" + "\n".join(skipped[:10])
+            if len(skipped) > 10:
+                message += f"\n... and {len(skipped) - 10} more"
+            QMessageBox.warning(self, "Import Finished", message)
+        else:
+            QMessageBox.information(self, "Success", message)
+
+    def import_csv_file(self, file_path):
+        """Add every usable row of the CSV file; return (imported count, list of skipped-row reasons)
+
+        A bad row used to stop the import half way, leaving the rows before it
+        imported and the rest not. Now bad rows are skipped and reported.
+        """
+        import csv
+
+        pm = self.app.password_manager
+        imported = 0
+        skipped = []
+
+        # utf-8-sig: CSV files saved by Excel start with a byte-order mark
+        with open(file_path, 'r', encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames or 'Password' not in reader.fieldnames:
+                raise ValueError("The file has no 'Password' column. Expected columns: "
+                                 "Title, Username, Password, URL, Notes")
+
+            for line_number, row in enumerate(reader, start=2):
+                password = row.get('Password') or ''
+                url = (row.get('URL') or '').strip()
+                username = (row.get('Username') or '').strip()
+                title = (row.get('Title') or '').strip() or (
+                    pm._extract_title_from_url(url) if url else username)
+
+                if not password:
+                    skipped.append(f"line {line_number}: no password")
+                    continue
+                if not title:
+                    skipped.append(f"line {line_number}: no title, URL or username")
+                    continue
+
+                try:
+                    pm.add_password(
+                        user_id=self.user_id,
+                        title=title,
+                        username=username,
+                        password=password,
+                        url=url,
+                        notes=row.get('Notes') or ''
+                    )
+                    imported += 1
+                except Exception as e:
+                    skipped.append(f"line {line_number}: {e}")
+
+        return imported, skipped
 
     def create_backup(self):
         """Create database backup"""
         from PyQt5.QtWidgets import QFileDialog
-        import shutil
         from datetime import datetime
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -1159,14 +1259,8 @@ class MainWindow(QMainWindow):
 
         if file_path:
             try:
-                # Close current connection
-                self.app.db.disconnect()
-
-                # Copy database file
-                shutil.copy2(self.app.db_path, file_path)
-
-                # Reconnect
-                self.app.db.connect()
+                # Consistent copy through SQLite's backup API, no need to disconnect
+                self.app.db.backup_to(file_path)
 
                 QMessageBox.information(self, "Success", f"Backup created:\n{file_path}")
 
@@ -1175,8 +1269,7 @@ class MainWindow(QMainWindow):
 
     def restore_backup(self):
         """Restore from backup"""
-        from PyQt5.QtWidgets import QFileDialog
-        import shutil
+        from PyQt5.QtWidgets import QFileDialog, QInputDialog
 
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -1185,34 +1278,71 @@ class MainWindow(QMainWindow):
             "Database Files (*.db)"
         )
 
-        if file_path:
-            reply = QMessageBox.warning(
-                self,
-                "Confirm Restore",
-                "Restoring from backup will overwrite all current data.\n\n"
-                "This action cannot be undone!\n\n"
-                "Are you absolutely sure?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+        if not file_path or not self.app.auth_manager.is_logged_in():
+            return
+
+        if not self.is_valid_backup(file_path):
+            QMessageBox.critical(
+                self, "Error",
+                "This file is not a Password Manager backup (no account found in it)."
             )
+            return
 
-            if reply == QMessageBox.Yes:
-                try:
-                    # Close current connection
-                    self.app.db.disconnect()
+        # Check the backup's master password BEFORE replacing anything: restoring
+        # a backup whose password is unknown would lock the user out of everything
+        backup_password, ok = QInputDialog.getText(
+            self, "Restore from Backup",
+            "Enter the master password of this backup\n(the one used when the backup was made):",
+            QLineEdit.Password
+        )
+        if not ok:
+            return
+        if not self.app.auth_manager.check_backup_password(file_path, backup_password):
+            QMessageBox.critical(self, "Error",
+                                 "Wrong master password for this backup. Nothing was changed.")
+            return
 
-                    # Copy backup file
-                    shutil.copy2(file_path, self.app.db_path)
+        reply = QMessageBox.warning(
+            self,
+            "Confirm Restore",
+            "Restoring from backup will replace all current data.\n\n"
+            "A copy of the current vault will be saved next to it first.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes or not self.app.auth_manager.is_logged_in():
+            return
 
-                    # Reconnect
-                    self.app.db.connect()
-                    self.app.db.create_tables()
+        try:
+            saved_copy = self.app.restore_database(file_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to restore: {str(e)}")
+            return
 
-                    self.refresh_data()
-                    QMessageBox.information(self, "Success", "Database restored from backup")
+        # The backup may use a different master password, so the key in
+        # memory no longer matches: log in again with the backup's password.
+        QMessageBox.information(
+            self, "Success",
+            "Database restored from backup.\n\n"
+            f"The previous vault was saved as:\n{saved_copy}\n\n"
+            "Please log in with the backup's master password."
+        )
+        self.app.lock_vault()
 
-                except Exception as e:
-                    QMessageBox.critical(self, "Error", f"Failed to restore: {str(e)}")
+    @staticmethod
+    def is_valid_backup(file_path):
+        """Check that the file is a vault database with an account in it"""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(f"file:{file_path}?mode=ro", uri=True)
+            try:
+                row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+                return bool(row and row[0])
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return False
 
     def lock_vault(self):
         """Lock the vault"""
@@ -1249,8 +1379,18 @@ class MainWindow(QMainWindow):
             "<p>© 2025 SecureVault</p>"
         )
 
+    def close_without_prompt(self):
+        """Close the window without the exit confirmation (used when locking)"""
+        self._skip_close_prompt = True
+        self.close()
+        self.deleteLater()
+
     def closeEvent(self, event):
         """Handle window close"""
+        if self._skip_close_prompt:
+            event.accept()
+            return
+
         reply = QMessageBox.question(
             self,
             "Exit",
@@ -1260,7 +1400,6 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.Yes:
-            self.refresh_timer.stop()
             event.accept()
         else:
             event.ignore()

@@ -94,13 +94,14 @@ class TestAddPassword:
             pm.add_password(user_id, "Test", "user", "pass123!")
 
     def test_add_password_calculates_strength(self, setup):
-        """Test that password strength is calculated"""
+        """Strength is calculated when the entry is read, but never stored in plain text"""
         db, encryption, pm, user_id = setup
 
         pwd_id = pm.add_password(user_id, "Strong", "user", "StrongPass123!")
 
         result = db.fetch_one("SELECT strength_score FROM passwords WHERE password_id = ?", (pwd_id,))
-        assert result['strength_score'] > 0
+        assert result['strength_score'] == 0
+        assert pm.get_password(pwd_id, user_id).strength_score > 0
 
 
 class TestGetPassword:

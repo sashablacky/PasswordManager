@@ -4,8 +4,6 @@ import math
 import logging
 from typing import List, Dict, Any
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -314,7 +312,9 @@ class PasswordGenerator:
             time_str = f"{int(seconds / 31536000)} years"
             security = "Strong"
         elif seconds < 31536000 * 1000000:
-            time_str = f"{int(seconds / 31536000 / 1000)} thousand years"
+            years = int(seconds / 31536000)
+            # 100-999 years used to be shown as "0 thousand years"
+            time_str = f"{years} years" if years < 1000 else f"{years // 1000} thousand years"
             security = "Very Strong"
         else:
             time_str = "Millions of years"

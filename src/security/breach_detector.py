@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+from security.encryption import BREACH_RESULT_FIELD, record_aad
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,14 +66,17 @@ class BreachDetector:
         "facebook_2021": "2021 Facebook leak (533M accounts)"
     }
 
-    def __init__(self, db_manager=None):
+    def __init__(self, db_manager=None, encryption=None):
         """
         Initialize breach detector
 
         Args:
             db_manager: Optional database manager for storing results
+            encryption: EncryptionEngine with the vault key; stored results are
+                encrypted with it (without it they are stored in plain text)
         """
         self.db = db_manager
+        self.encryption = encryption
         self.cache = {}  # Cache for API results
         self.cache_expiry = timedelta(hours=24)  # Cache for 24 hours
         self.last_check = {}
@@ -88,7 +91,8 @@ class BreachDetector:
             password: Password to check
 
         Returns:
-            Tuple[bool, int, List[str]]: (breach_found, count, sources)
+            Tuple[Optional[bool], int, List[str]]: (breach_found, count, sources).
+            breach_found is None when the check could not be done (e.g. no internet).
         """
         try:
             # Hash the password with SHA-1
@@ -104,11 +108,14 @@ class BreachDetector:
                 else:
                     # Cache expired, fetch again
                     hashes = self._fetch_hibp_hashes(prefix)
-                    self.cache[prefix] = (datetime.now(), hashes)
             else:
                 # Not in cache, fetch from API
                 hashes = self._fetch_hibp_hashes(prefix)
-                self.cache[prefix] = (datetime.now(), hashes)
+
+            if hashes is None:
+                # Unknown result: do not report the password as safe
+                return None, 0, []
+            self.cache[prefix] = (datetime.now(), hashes)
 
             # Check if our hash suffix is in the results
             for line in hashes:
@@ -121,9 +128,9 @@ class BreachDetector:
 
         except Exception as e:
             logger.error(f"HIBP check failed: {e}")
-            return False, 0, []
+            return None, 0, []
 
-    def _fetch_hibp_hashes(self, prefix: str) -> List[str]:
+    def _fetch_hibp_hashes(self, prefix: str) -> Optional[List[str]]:
         """
         Fetch hash suffixes from HIBP API
 
@@ -131,7 +138,7 @@ class BreachDetector:
             prefix: First 5 characters of SHA-1 hash
 
         Returns:
-            List of hash suffixes with counts
+            List of hash suffixes with counts, or None if the API could not be reached
         """
         try:
             url = self.HIBP_API_URL + prefix
@@ -142,14 +149,14 @@ class BreachDetector:
             response = requests.get(url, headers=headers, timeout=10)
 
             if response.status_code == 200:
-                return response.text.strip().split('\r\n')
+                return response.text.strip().splitlines()
             else:
                 logger.warning(f"HIBP API returned status {response.status_code}")
-                return []
+                return None
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch from HIBP: {e}")
-            return []
+            return None
 
     def _identify_breach_sources(self, password: str, count: int) -> List[str]:
         """
@@ -174,25 +181,13 @@ class BreachDetector:
         elif count > 1000000:
             sources.append("Common breaches (1M+ occurrences)")
 
-        # Add specific sources based on password patterns
-        password_lower = password.lower()
-
-        if re.search(r'(linkedin|linked in)', password_lower, re.IGNORECASE):
-            sources.append(self.BREACH_SOURCES["linkedin"])
-
-        if re.search(r'(facebook|fb)', password_lower, re.IGNORECASE):
-            sources.append(self.BREACH_SOURCES["facebook"])
-
-        if re.search(r'(adobe|photoshop)', password_lower, re.IGNORECASE):
-            sources.append(self.BREACH_SOURCES["adobe"])
-
-        if re.search(r'(yahoo|ymail)', password_lower, re.IGNORECASE):
-            sources.append(self.BREACH_SOURCES["yahoo"])
-
-        if password in self.COMMON_PASSWORDS:
+        # HIBP's password range API only reports how often a password was seen,
+        # not in which breach. Breach names used to be guessed from words in the
+        # password (e.g. "fb" -> Facebook), which showed made-up information.
+        if password.lower() in self.COMMON_PASSWORDS:
             sources.append("Common/weak password used in multiple breaches")
 
-        return sources if sources else ["Unknown breach source"]
+        return sources if sources else [f"Seen {count:,} times in known breaches (sources not reported)"]
 
     def analyze_password_risk(self, password: str) -> Dict[str, Any]:
         """
@@ -206,6 +201,7 @@ class BreachDetector:
         """
         risk_assessment = {
             'breach_found': False,
+            'check_failed': False,
             'breach_count': 0,
             'risk_level': 'low',
             'issues': [],
@@ -234,7 +230,12 @@ class BreachDetector:
         # Check HIBP
         breach_found, count, sources = self.check_password_hibp(password)
 
-        if breach_found:
+        if breach_found is None:
+            risk_assessment['check_failed'] = True
+            risk_assessment['issues'].append(
+                "Could not check online breach database (no internet connection?)"
+            )
+        elif breach_found:
             risk_assessment['breach_found'] = True
             risk_assessment['breach_count'] = count
             risk_assessment['sources'] = sources
@@ -353,6 +354,9 @@ class BreachDetector:
         if assessment['local_checks']['has_repeated_chars']:
             recommendations.append("• Avoid repeated characters")
 
+        if assessment.get('check_failed'):
+            recommendations.append("• Breach status unknown: check again when online")
+
         if not recommendations:
             recommendations.append("✓ Password appears secure")
 
@@ -375,7 +379,7 @@ class BreachDetector:
             passwords = password_manager.get_all_passwords(user_id)
 
             for pwd in passwords:
-                logger.info(f"Checking password: {pwd.title}")
+                logger.info(f"Checking password {pwd.password_id}")
 
                 # Analyze the password
                 assessment = self.analyze_password_risk(pwd.password)
@@ -395,8 +399,8 @@ class BreachDetector:
 
                 results.append(result)
 
-                # Store in database if available
-                if self.db:
+                # Store in database if available (keep the previous result if the check failed)
+                if self.db and not assessment.get('check_failed'):
                     self._store_breach_result(user_id, pwd.password_id, assessment)
 
             logger.info(f"Checked {len(passwords)} passwords for user {user_id}")
@@ -430,65 +434,115 @@ class BreachDetector:
             logger.error(f"Failed to ensure breach table schema: {e}")
 
     def _store_breach_result(self, user_id: int, password_id: int, assessment: Dict[str, Any]) -> None:
-        """Store breach check result in database"""
+        """Store breach check result in database
+
+        With an encryption engine the whole result is stored as one encrypted
+        blob bound to the entry: whether a password was found in breaches and
+        how risky it is would otherwise be readable without the master password.
+        """
         try:
             # Ensure table exists
             self._ensure_breach_table_schema()
 
-            # Delete old results for this password
+            result = {
+                'breach_found': bool(assessment.get('breach_found', False)),
+                'breach_count': assessment.get('breach_count', 0),
+                'risk_level': assessment.get('risk_level', 'low'),
+                'sources': assessment.get('sources', []),
+                'recommendations': assessment.get('recommendations', []),
+            }
+
+            if self.encryption is not None:
+                encrypted_result = self.encryption.encrypt(
+                    json.dumps(result),
+                    record_aad(self.encryption, password_id, BREACH_RESULT_FIELD)
+                )
+                # The plain columns only get neutral values
+                row = (0, 0, 'unknown', None, None, encrypted_result)
+            else:
+                row = (int(result['breach_found']), result['breach_count'], result['risk_level'],
+                       json.dumps(result['sources']), json.dumps(result['recommendations']), None)
+
+            # Replace the previous result for this password
             self.db.execute_query(
                 "DELETE FROM breach_checks WHERE password_id = ?",
                 (password_id,)
             )
-
-            # Prepare data
-            now = datetime.now()
-            breach_found = 1 if assessment.get('breach_found', False) else 0
-            breach_count = assessment.get('breach_count', 0)
-            risk_level = assessment.get('risk_level', 'low')
-            sources = json.dumps(assessment.get('sources', []))
-            recommendations = json.dumps(assessment.get('recommendations', []))
-
-            # Insert new result
             self.db.execute_query("""
-                INSERT INTO breach_checks 
-                (password_id, user_id, check_date, breach_found, breach_count, risk_level, breach_details, recommendations)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                password_id,
-                user_id,
-                now,
-                breach_found,
-                breach_count,
-                risk_level,
-                sources,
-                recommendations
-            ))
+                INSERT INTO breach_checks
+                (password_id, user_id, check_date, breach_found, breach_count, risk_level,
+                 breach_details, recommendations, encrypted_result)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (password_id, user_id, datetime.now(), *row))
 
             logger.debug(f"Stored breach result for password {password_id}")
 
         except Exception as e:
-            logger.error(f"Failed to store breach result: {e}")
-            # Print more details for debugging
-            import traceback
-            traceback.print_exc()
             # Don't raise - this is a non-critical operation
+            logger.error(f"Failed to store breach result: {e}")
+
+    @staticmethod
+    def _parse_json_list(value) -> list:
+        if not value:
+            return []
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    def _load_results(self, where: str, params: Tuple) -> List[Dict[str, Any]]:
+        """Stored results as dicts, decrypting encrypted ones; unreadable rows are skipped"""
+        table_exists = self.db.fetch_one(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='breach_checks'"
+        )
+        if not table_exists:
+            return []
+
+        results = []
+        for row in self.db.fetch_all(f"SELECT * FROM breach_checks WHERE {where}", params):
+            encrypted_result = row.get('encrypted_result')
+            if encrypted_result:
+                if self.encryption is None:
+                    continue
+                try:
+                    data = json.loads(self.encryption.decrypt(
+                        encrypted_result,
+                        record_aad(self.encryption, row['password_id'], BREACH_RESULT_FIELD)
+                    ))
+                except Exception as e:
+                    logger.warning(f"Could not read stored breach result {row['check_id']}: {e}")
+                    continue
+                breach_found = bool(data.get('breach_found'))
+                breach_count = data.get('breach_count', 0)
+                risk_level = data.get('risk_level', 'low')
+                sources = data.get('sources', [])
+                recommendations = data.get('recommendations', [])
+            else:
+                breach_found = bool(row['breach_found'])
+                breach_count = row['breach_count']
+                risk_level = row['risk_level']
+                sources = self._parse_json_list(row['breach_details'])
+                recommendations = self._parse_json_list(row['recommendations'])
+
+            results.append({
+                'check_id': row['check_id'],
+                'password_id': row['password_id'],
+                'user_id': row['user_id'],
+                'check_date': row['check_date'],
+                'breach_found': breach_found,
+                'breach_count': breach_count,
+                'risk_level': risk_level,
+                'breach_details': sources,
+                'recommendations': recommendations,
+            })
+        return results
 
     def get_breach_history(self, password_id: int) -> List[Dict[str, Any]]:
         """Get breach check history for a password"""
         try:
-            results = self.db.fetch_all(
-                "SELECT * FROM breach_checks WHERE password_id = ? ORDER BY check_date DESC",
-                (password_id,)
-            )
-
-            for result in results:
-                if result['breach_details']:
-                    result['breach_details'] = json.loads(result['breach_details'])
-                if result['recommendations']:
-                    result['recommendations'] = json.loads(result['recommendations'])
-
-            return results
+            results = self._load_results("password_id = ?", (password_id,))
+            return sorted(results, key=lambda r: str(r['check_date']), reverse=True)
 
         except Exception as e:
             logger.error(f"Failed to get breach history: {e}")
@@ -497,40 +551,9 @@ class BreachDetector:
     def get_compromised_passwords(self, user_id: int) -> List[Dict[str, Any]]:
         """Get all compromised passwords for a user"""
         try:
-            # Check if breach_checks table exists
-            table_exists = self.db.fetch_one(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='breach_checks'"
-            )
-
-            if not table_exists:
-                return []
-
-            results = self.db.fetch_all("""
-                SELECT bc.*, p.encrypted_username
-                FROM breach_checks bc
-                JOIN passwords p ON bc.password_id = p.password_id
-                WHERE bc.user_id = ? AND bc.breach_found = 1
-                ORDER BY bc.breach_count DESC, bc.check_date DESC
-            """, (user_id,))
-
-            # Parse JSON fields
-            for result in results:
-                if result['breach_details']:
-                    try:
-                        result['breach_details'] = json.loads(result['breach_details'])
-                    except:
-                        result['breach_details'] = []
-                else:
-                    result['breach_details'] = []
-
-                if result['recommendations']:
-                    try:
-                        result['recommendations'] = json.loads(result['recommendations'])
-                    except:
-                        result['recommendations'] = []
-                else:
-                    result['recommendations'] = []
-
+            results = [r for r in self._load_results("user_id = ?", (user_id,)) if r['breach_found']]
+            results.sort(key=lambda r: str(r['check_date']), reverse=True)
+            results.sort(key=lambda r: r['breach_count'] or 0, reverse=True)
             return results
 
         except Exception as e:
@@ -539,83 +562,37 @@ class BreachDetector:
 
     def get_breach_statistics(self, user_id: int) -> Dict[str, Any]:
         """Get breach statistics for a user"""
+        empty = {
+            'total_checked': 0,
+            'compromised': 0,
+            'risk_levels': {},
+            'last_check': None
+        }
         try:
-            # Check if table exists and has user_id column
-            table_exists = self.db.fetch_one(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='breach_checks'"
-            )
+            results = self._load_results("user_id = ?", (user_id,))
+            if not results:
+                return empty
 
-            if not table_exists:
-                return {
-                    'total_checked': 0,
-                    'compromised': 0,
-                    'risk_levels': {},
-                    'last_check': None
-                }
+            risk_levels: Dict[str, int] = {}
+            for r in results:
+                risk_levels[r['risk_level']] = risk_levels.get(r['risk_level'], 0) + 1
 
-            # Check if user_id column exists
-            columns = self.db.fetch_all("PRAGMA table_info(breach_checks)")
-            column_names = [col['name'] for col in columns]
-
-            if 'user_id' not in column_names:
-                # Old schema - can't get accurate stats
-                return {
-                    'total_checked': 0,
-                    'compromised': 0,
-                    'risk_levels': {},
-                    'last_check': None
-                }
-
-            total = self.db.fetch_one("""
-                SELECT COUNT(DISTINCT password_id) as count
-                FROM breach_checks
-                WHERE user_id = ?
-            """, (user_id,)) or {'count': 0}
-
-            compromised = self.db.fetch_one("""
-                SELECT COUNT(DISTINCT password_id) as count
-                FROM breach_checks
-                WHERE user_id = ? AND breach_found = 1
-            """, (user_id,)) or {'count': 0}
-
-            risk_levels = self.db.fetch_all("""
-                SELECT risk_level, COUNT(*) as count
-                FROM breach_checks
-                WHERE user_id = ?
-                GROUP BY risk_level
-            """, (user_id,))
-
-            last_check = self.db.fetch_one("""
-                SELECT MAX(check_date) as last_check
-                FROM breach_checks
-                WHERE user_id = ?
-            """, (user_id,))
-
-            last_check_date = None
-            if last_check and last_check['last_check']:
-                try:
-                    if isinstance(last_check['last_check'], str):
-                        last_check_date = datetime.strptime(last_check['last_check'], '%Y-%m-%d %H:%M:%S.%f')
-                    else:
-                        last_check_date = last_check['last_check']
-                except:
-                    last_check_date = last_check['last_check']
+            last_check = max(str(r['check_date']) for r in results)
+            try:
+                last_check_date = datetime.strptime(last_check, '%Y-%m-%d %H:%M:%S.%f')
+            except ValueError:
+                last_check_date = last_check
 
             return {
-                'total_checked': total['count'],
-                'compromised': compromised['count'],
-                'risk_levels': {r['risk_level']: r['count'] for r in risk_levels},
+                'total_checked': len({r['password_id'] for r in results}),
+                'compromised': len({r['password_id'] for r in results if r['breach_found']}),
+                'risk_levels': risk_levels,
                 'last_check': last_check_date
             }
 
         except Exception as e:
             logger.error(f"Failed to get breach statistics: {e}")
-            return {
-                'total_checked': 0,
-                'compromised': 0,
-                'risk_levels': {},
-                'last_check': None
-            }
+            return empty
 
 
 # Example usage

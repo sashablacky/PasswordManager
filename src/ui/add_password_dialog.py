@@ -10,6 +10,8 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 
 from security.generator import PasswordGenerator, GeneratorOptions
+from ui.clipboard import copy_secret
+from ui.layout_utils import set_scrollable_layout
 
 
 class AddPasswordDialog(QDialog):
@@ -39,7 +41,9 @@ class AddPasswordDialog(QDialog):
     # -------------------------
     def setup_ui(self):
         self.setWindowTitle("Add Password" if not self.is_edit else "Edit Password")
-        self.setFixedSize(1000, 950)
+        # Fits small laptop screens (1366x768); the user can still enlarge it
+        self.setMinimumSize(520, 640)
+        self.resize(620, 700)
 
         self.setStyleSheet("""
             QDialog { background-color: #f5f7fa; }
@@ -64,7 +68,6 @@ class AddPasswordDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(30, 30, 30, 30)
 
-        # Title label only (NO input field anymore)
         title_label = QLabel("🔐 Add New Password" if not self.is_edit else "🔐 Edit Password")
         font = QFont()
         font.setPointSize(20)
@@ -77,8 +80,14 @@ class AddPasswordDialog(QDialog):
         form = QVBoxLayout()
         form.setSpacing(10)
 
+        # Title (filled in from the URL if left empty)
+        form.addWidget(QLabel("Title"))
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("e.g. My Bank (taken from the URL if empty)")
+        form.addWidget(self.title_input)
+
         # Username
-        form.addWidget(QLabel("Username/Email *"))
+        form.addWidget(QLabel("Username/Email"))
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("Enter username or email")
         form.addWidget(self.username_input)
@@ -133,7 +142,7 @@ class AddPasswordDialog(QDialog):
         # Notes
         form.addWidget(QLabel("Notes"))
         self.notes_input = QTextEdit()
-        self.notes_input.setMaximumHeight(100)
+        self.notes_input.setMaximumHeight(80)
         form.addWidget(self.notes_input)
 
         # Favorite
@@ -148,8 +157,8 @@ class AddPasswordDialog(QDialog):
         buttons.accepted.connect(self.save_password)
         buttons.rejected.connect(self.reject)
 
-        layout.addWidget(buttons)
-        self.setLayout(layout)
+        # Scrollable form with the buttons always visible (fits small screens)
+        set_scrollable_layout(self, layout, buttons)
 
         self.password_input.textChanged.connect(self.update_strength)
 
@@ -183,6 +192,7 @@ class AddPasswordDialog(QDialog):
             )
 
     def load_password_data(self):
+        self.title_input.setText(getattr(self.password_data, 'title', ''))
         self.username_input.setText(getattr(self.password_data, 'username', ''))
         self.password_input.setText(getattr(self.password_data, 'password', ''))
         self.url_input.setText(getattr(self.password_data, 'url', ''))
@@ -220,8 +230,7 @@ class AddPasswordDialog(QDialog):
         )
 
         if reply == QMessageBox.Yes:
-            from PyQt5.QtWidgets import QApplication
-            QApplication.clipboard().setText(password)
+            copy_secret(password)
 
     def toggle_password_visibility(self, state):
         if state == Qt.Checked:
@@ -273,19 +282,20 @@ class AddPasswordDialog(QDialog):
     # -------------------------
     def save_password(self):
         username = self.username_input.text().strip()
-        password = self.password_input.text().strip()
+        # Not stripped: leading/trailing spaces are part of the password
+        password = self.password_input.text()
         url = self.url_input.text().strip()
-
-        if not username:
-            QMessageBox.warning(self, "Error", "Username is required")
-            return
 
         if not password:
             QMessageBox.warning(self, "Error", "Password is required")
             return
 
-        # AUTO TITLE FROM URL
-        title = self.extract_title_from_url(url)
+        # Title typed by the user, otherwise taken from the URL, otherwise the username.
+        # The username is optional (PIN codes, Wi-Fi passwords), but then a title is needed.
+        title = self.title_input.text().strip() or (self.extract_title_from_url(url) if url else username)
+        if not title:
+            QMessageBox.warning(self, "Error", "Enter a title, a URL or a username")
+            return
 
         notes = self.notes_input.toPlainText().strip()
         category_id = self.category_combo.currentData()
@@ -296,6 +306,7 @@ class AddPasswordDialog(QDialog):
                 success = self.password_manager.update_password(
                     password_id=self.password_data.password_id,
                     user_id=self.user_id,
+                    title=title,
                     username=username,
                     password=password,
                     url=url,
@@ -316,7 +327,7 @@ class AddPasswordDialog(QDialog):
             else:
                 pid = self.password_manager.add_password(
                     user_id=self.user_id,
-                    title=title,   # <-- AUTO GENERATED
+                    title=title,
                     username=username,
                     password=password,
                     url=url,

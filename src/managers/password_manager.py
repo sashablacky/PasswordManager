@@ -5,11 +5,13 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 
 from database.db_manager import DatabaseManager
-from security.encryption import EncryptionEngine
+from security.encryption import EncryptionEngine, record_aad
+from security.generator import PasswordGenerator
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Marks "argument not given" where None is a meaningful value (e.g. "no category")
+_UNSET = object()
 
 
 class PasswordManagerError(Exception):
@@ -78,20 +80,10 @@ class PasswordManager:
         self.db = db_manager
         self.encryption = encryption_engine
 
-        # Ensure audit_log table exists
-        try:
-            self.db.execute_query("""
-                CREATE TABLE IF NOT EXISTS audit_log (
-                    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    timestamp TIMESTAMP NOT NULL,
-                    action_type TEXT NOT NULL,
-                    details_json TEXT DEFAULT '{}'
-                )
-            """)
-            logger.info("Ensured audit_log table exists")
-        except Exception as e:
-            logger.warning(f"Could not create audit_log table: {e}")
+        self._strength_meter = PasswordGenerator()
+
+        # Number of entries the last get_all_passwords() call could not decrypt
+        self.last_decrypt_failures = 0
 
         logger.info("PasswordManager initialized")
 
@@ -107,36 +99,44 @@ class PasswordManager:
             raise PasswordManagerError("Password is required")
 
         try:
-            # Calculate password strength
-            strength = self._calculate_strength(password)
-
-            # Encrypt sensitive fields
-            encrypted_password = self.encryption.encrypt(password)
-            encrypted_username = self.encryption.encrypt(username) if username else None
-            encrypted_url = self.encryption.encrypt(url) if url else None
-            encrypted_notes = self.encryption.encrypt(notes) if notes else None
-
-            # Store in database
+            # The ciphertexts are bound to the entry id, which is only known after
+            # the INSERT, so the row is created and filled in one transaction
             now = datetime.now()
-            cursor = self.db.execute_query(
-                """INSERT INTO passwords 
-                   (user_id, encrypted_password, encrypted_username, encrypted_url, 
-                    encrypted_notes, category_id, strength_score, created_date, modified_date)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (user_id, encrypted_password, encrypted_username, encrypted_url,
-                 encrypted_notes, category_id, strength, now, now)
-            )
+            self.db.begin_transaction()
+            try:
+                # strength_score stays 0: a stored score would show which passwords are
+                # weak without the key. The score is computed when the entry is read.
+                cursor = self.db.execute_query(
+                    """INSERT INTO passwords
+                       (user_id, encrypted_password, category_id, strength_score, created_date, modified_date)
+                       VALUES (?, ?, ?, 0, ?, ?)""",
+                    (user_id, b"", category_id, now, now)
+                )
+                password_id = cursor.lastrowid
 
-            password_id = cursor.lastrowid
+                self.db.execute_query(
+                    """UPDATE passwords SET encrypted_title = ?, encrypted_password = ?,
+                              encrypted_username = ?, encrypted_url = ?, encrypted_notes = ?
+                       WHERE password_id = ?""",
+                    (self._encrypt(title.strip(), password_id, "encrypted_title"),
+                     self._encrypt(password, password_id, "encrypted_password"),
+                     self._encrypt(username, password_id, "encrypted_username"),
+                     self._encrypt(url, password_id, "encrypted_url"),
+                     self._encrypt(notes, password_id, "encrypted_notes"),
+                     password_id)
+                )
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                raise
 
             # Log action
+            # The audit log is stored unencrypted, so it never holds titles or other entry data
             self._log_action(user_id, "PASSWORD_ADDED", {
-                "password_id": password_id,
-                "title": title,
-                "strength": strength
+                "password_id": password_id
             })
 
-            logger.info(f"✓ Password '{title}' added (ID: {password_id}, strength: {strength})")
+            logger.info(f"✓ Password added (ID: {password_id})")
 
             return password_id
 
@@ -158,30 +158,7 @@ class PasswordManager:
             if not result:
                 raise PasswordManagerError(f"Password with ID {password_id} not found")
 
-            # Decrypt sensitive fields
-            password = self.encryption.decrypt(result['encrypted_password'])
-            username = self.encryption.decrypt(result['encrypted_username']) if result['encrypted_username'] else ""
-            url = self.encryption.decrypt(result['encrypted_url']) if result['encrypted_url'] else ""
-            notes = self.encryption.decrypt(result['encrypted_notes']) if result['encrypted_notes'] else ""
-
-            # Get title from URL or use generic name
-            title = self._extract_title_from_url(url) if url else f"Password {password_id}"
-
-            return Password(
-                password_id=result['password_id'],
-                user_id=result['user_id'],
-                title=title,
-                username=username,
-                password=password,
-                url=url,
-                notes=notes,
-                category_id=result['category_id'],
-                strength_score=result['strength_score'],
-                created_date=result['created_date'],
-                modified_date=result['modified_date'],
-                last_used_date=result['last_used_date'],
-                is_favorite=bool(result['is_favorite'])
-            )
+            return self._row_to_password(result)
 
         except Exception as e:
             logger.error(f"✗ Failed to get password: {e}")
@@ -198,35 +175,15 @@ class PasswordManager:
             )
 
             passwords = []
+            failures = 0
             for result in results:
                 try:
-                    password = self.encryption.decrypt(result['encrypted_password'])
-                    username = self.encryption.decrypt(result['encrypted_username']) if result[
-                        'encrypted_username'] else ""
-                    url = self.encryption.decrypt(result['encrypted_url']) if result['encrypted_url'] else ""
-                    notes = self.encryption.decrypt(result['encrypted_notes']) if result['encrypted_notes'] else ""
-
-                    title = self._extract_title_from_url(url) if url else f"Password {result['password_id']}"
-
-                    passwords.append(Password(
-                        password_id=result['password_id'],
-                        user_id=result['user_id'],
-                        title=title,
-                        username=username,
-                        password=password,
-                        url=url,
-                        notes=notes,
-                        category_id=result['category_id'],
-                        strength_score=result['strength_score'],
-                        created_date=result['created_date'],
-                        modified_date=result['modified_date'],
-                        last_used_date=result['last_used_date'],
-                        is_favorite=bool(result['is_favorite'])
-                    ))
+                    passwords.append(self._row_to_password(result))
                 except Exception as e:
+                    failures += 1
                     logger.warning(f"Failed to decrypt password {result['password_id']}: {e}")
-                    continue
 
+            self.last_decrypt_failures = failures
             logger.info(f"✓ Retrieved {len(passwords)} passwords for user {user_id}")
             return passwords
 
@@ -240,18 +197,19 @@ class PasswordManager:
                         password: str = None,
                         url: str = None,
                         notes: str = None,
-                        category_id: int = None) -> bool:
+                        category_id=_UNSET) -> bool:
         """
         Update a password entry
 
         Args:
             password_id: ID of the password to update
             user_id: ID of the user (for security check)
+            title: New title (optional)
             username: New username (optional)
             password: New password (optional)
             url: New URL (optional)
             notes: New notes (optional)
-            category_id: New category ID (optional)
+            category_id: New category ID (optional, None removes the category)
 
         Returns:
             bool: True if update successful
@@ -274,33 +232,36 @@ class PasswordManager:
             params = []
             update_details = {}
 
+            if title is not None:
+                if not title.strip():
+                    raise PasswordManagerError("Title is required")
+                updates.append("encrypted_title = ?")
+                params.append(self._encrypt(title.strip(), password_id, "encrypted_title"))
+                update_details['title_changed'] = True
+
             if password is not None:
-                encrypted_password = self.encryption.encrypt(password)
-                strength = self._calculate_strength(password)
+                if not password:
+                    raise PasswordManagerError("Password is required")
                 updates.append("encrypted_password = ?")
-                updates.append("strength_score = ?")
-                params.extend([encrypted_password, strength])
+                params.append(self._encrypt(password, password_id, "encrypted_password"))
                 update_details['password_changed'] = True
 
             if username is not None:
-                encrypted_username = self.encryption.encrypt(username) if username else None
                 updates.append("encrypted_username = ?")
-                params.append(encrypted_username)
+                params.append(self._encrypt(username, password_id, "encrypted_username"))
                 update_details['username_changed'] = True
 
             if url is not None:
-                encrypted_url = self.encryption.encrypt(url) if url else None
                 updates.append("encrypted_url = ?")
-                params.append(encrypted_url)
+                params.append(self._encrypt(url, password_id, "encrypted_url"))
                 update_details['url_changed'] = True
 
             if notes is not None:
-                encrypted_notes = self.encryption.encrypt(notes) if notes else None
                 updates.append("encrypted_notes = ?")
-                params.append(encrypted_notes)
+                params.append(self._encrypt(notes, password_id, "encrypted_notes"))
                 update_details['notes_changed'] = True
 
-            if category_id is not None:
+            if category_id is not _UNSET:
                 updates.append("category_id = ?")
                 params.append(category_id)
                 update_details['category_changed'] = True
@@ -354,13 +315,6 @@ class PasswordManager:
             if not existing:
                 raise PasswordManagerError(f"Password with ID {password_id} not found")
 
-            # Get title for logging
-            try:
-                url = self.encryption.decrypt(existing['encrypted_url']) if existing['encrypted_url'] else ""
-                title = self._extract_title_from_url(url)
-            except:
-                title = f"Password {password_id}"
-
             # Delete associated breach checks
             self.db.execute_query(
                 "DELETE FROM breach_checks WHERE password_id = ?",
@@ -375,8 +329,7 @@ class PasswordManager:
 
             # Log action
             self._log_action(user_id, "PASSWORD_DELETED", {
-                "password_id": password_id,
-                "title": title
+                "password_id": password_id
             })
 
             logger.info(f"✓ Password {password_id} deleted")
@@ -416,7 +369,7 @@ class PasswordManager:
                         query_lower in pwd.notes.lower()):
                     matching.append(pwd)
 
-            logger.info(f"✓ Search '{query}' found {len(matching)} results")
+            logger.debug(f"Search found {len(matching)} results")
             return matching
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -581,71 +534,51 @@ class PasswordManager:
         """
         Calculate password strength score (0-100)
 
-        Factors:
-        - Length
-        - Character variety (uppercase, lowercase, numbers, symbols)
-        - No common patterns
-
-        Args:
-            password: Password to evaluate
-
-        Returns:
-            int: Strength score (0-100)
+        Uses the same scoring as the generator and the add/edit dialog, so a
+        password gets the same score everywhere in the app.
         """
-        if not password:
-            return 0
+        return self._strength_meter.calculate_strength_score(password)
 
-        score = 0
+    def _encrypt(self, value: str, password_id: int, field: str) -> Optional[bytes]:
+        """Encrypt one field of an entry, bound to that entry and field (empty -> NULL)"""
+        if not value:
+            return None
+        return self.encryption.encrypt(value, record_aad(self.encryption, password_id, field))
 
-        # Length (max 30 points)
-        length = len(password)
-        if length >= 16:
-            score += 30
-        elif length >= 12:
-            score += 25
-        elif length >= 8:
-            score += 15
-        else:
-            score += length * 2  # Give some points for shorter passwords
+    def _decrypt(self, result: Dict[str, Any], field: str) -> str:
+        value = result.get(field)
+        if not value:
+            return ""
+        return self.encryption.decrypt(value, record_aad(self.encryption, result['password_id'], field))
 
-        # Character variety (max 40 points)
-        has_lower = any(c.islower() for c in password)
-        has_upper = any(c.isupper() for c in password)
-        has_digit = any(c.isdigit() for c in password)
-        has_symbol = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password)
+    def _row_to_password(self, result: Dict[str, Any]) -> Password:
+        """Decrypt a passwords row into a Password object"""
+        password = self._decrypt(result, 'encrypted_password')
+        username = self._decrypt(result, 'encrypted_username')
+        url = self._decrypt(result, 'encrypted_url')
+        notes = self._decrypt(result, 'encrypted_notes')
 
-        variety_count = sum([has_lower, has_upper, has_digit, has_symbol])
-        score += variety_count * 10
+        title = self._decrypt(result, 'encrypted_title')
+        if not title:
+            # Entries saved by older versions have no stored title
+            title = self._extract_title_from_url(url) if url else f"Password {result['password_id']}"
 
-        # Unique characters (max 20 points)
-        if len(password) > 0:
-            unique_ratio = len(set(password)) / len(password)
-            score += int(unique_ratio * 20)
-
-        # Penalties for common patterns (max -30 points)
-        password_lower = password.lower()
-
-        common_patterns = ['password', '123456', 'qwerty', 'abc123', 'letmein', 'admin', 'welcome']
-        for pattern in common_patterns:
-            if pattern in password_lower:
-                score -= 20
-                break
-
-        # Sequential characters penalty
-        for i in range(len(password_lower) - 2):
-            if password_lower[i:i + 3] in 'abcdefghijklmnopqrstuvwxyz0123456789':
-                score -= 5
-                break
-
-        # Repeated characters penalty
-        if len(password) >= 3:
-            for i in range(len(password) - 2):
-                if password[i] == password[i + 1] == password[i + 2]:
-                    score -= 10
-                    break
-
-        # Cap at 0-100
-        return max(0, min(100, score))
+        return Password(
+            password_id=result['password_id'],
+            user_id=result['user_id'],
+            title=title,
+            username=username,
+            password=password,
+            url=url,
+            notes=notes,
+            category_id=result['category_id'],
+            # Recomputed so entries scored by older versions match the current scale
+            strength_score=self._calculate_strength(password),
+            created_date=result['created_date'],
+            modified_date=result['modified_date'],
+            last_used_date=result['last_used_date'],
+            is_favorite=bool(result['is_favorite'])
+        )
 
     def _extract_title_from_url(self, url: str) -> str:
         """Extract a readable title from URL"""

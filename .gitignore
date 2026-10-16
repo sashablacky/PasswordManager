@@ -1,0 +1,36 @@
+# Vault databases and logs hold the master password hash and user data: never ship or commit them
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.log
+error.log
+settings.json
+
+# Secrets and local environment
+.env
+.env.*
+*.pem
+*.key
+
+# Python, tests, coverage
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.venv/
+venv/
+
+# Build output
+build/
+dist/
+*.spec
+
+# Local copies made before big changes
+backups/

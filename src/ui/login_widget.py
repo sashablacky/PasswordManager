@@ -20,13 +20,16 @@ class LoginWidget(QWidget):
         super().__init__()
         self.auth_manager = auth_manager
         self.generator = PasswordGenerator()
+        self.account_exists = False
         self.setup_ui()
         self.check_account_exists()
 
     def setup_ui(self):
         """Set up the user interface"""
         self.setWindowTitle("Password Manager - Login")
-        self.setFixedSize(1000, 1000)
+        # Fits small laptop screens (1366x768); the user can still enlarge it
+        self.setMinimumSize(460, 600)
+        self.resize(520, 680)
         self.setStyleSheet("""
             QWidget {
                 background-color: #f5f7fa;
@@ -84,10 +87,9 @@ class LoginWidget(QWidget):
         # Password input
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setMaxLength(128)
         self.password_input.setPlaceholderText("Enter your master password")
         self.password_input.setMinimumHeight(45)
-        self.password_input.returnPressed.connect(self.on_login_clicked)
+        self.password_input.returnPressed.connect(self.on_return_pressed)
         layout.addWidget(self.password_input)
 
         # Show/Hide password checkbox
@@ -187,22 +189,22 @@ class LoginWidget(QWidget):
 
     def check_account_exists(self):
         """Check if an account exists and update UI accordingly"""
-        from database.db_manager import DatabaseManager
-        db = DatabaseManager('password_vault.db')
-        db.connect()
-        user = db.fetch_one("SELECT user_id FROM users LIMIT 1")
-        db.disconnect()
+        self.account_exists = self.auth_manager.account_exists()
 
-        if user:
+        if self.account_exists:
             # Account exists - show login mode
-            self.create_account_button.setText("Create New Account (Current Account Will Be Overwritten)")
+            self.create_account_button.setText("Reset Vault and Create New Account")
             self.info_label.show()
             self.generate_btn.hide()
         else:
             # No account - show account creation mode
-            self.login_button.setEnabled(False)
+            self.login_button.hide()
             self.password_input.textChanged.connect(self.on_password_changed)
-            self.info_label.setText("🔐 Create your master password.\nMake it strong and memorable!")
+            self.info_label.setText(
+                "🔐 Create your master password.\n"
+                "At least 12 characters mixing letters, numbers and symbols,\n"
+                "or a passphrase of 16+ characters (e.g. four random words)."
+            )
             self.info_label.setStyleSheet("""
                 color: #667eea;
                 font-size: 11px;
@@ -217,10 +219,15 @@ class LoginWidget(QWidget):
         """Handle password changes for strength checking"""
         if text:
             self.check_password_strength(text)
-            self.login_button.setEnabled(True)
         else:
             self.strength_label.hide()
-            self.login_button.setEnabled(False)
+
+    def on_return_pressed(self):
+        """Enter logs in when an account exists, otherwise creates one"""
+        if self.account_exists:
+            self.on_login_clicked()
+        else:
+            self.on_create_account_clicked()
 
     def on_login_clicked(self):
         """Handle login button click"""
@@ -242,26 +249,22 @@ class LoginWidget(QWidget):
 
     def on_create_account_clicked(self):
         """Handle create account button click"""
-        # Check if account exists and warn user
-        from database.db_manager import DatabaseManager
-        db = DatabaseManager('password_vault.db')
-        db.connect()
-        user = db.fetch_one("SELECT user_id FROM users LIMIT 1")
-        db.disconnect()
-
-        if user:
+        overwrite = False
+        if self.auth_manager.account_exists():
             # Account exists - warn user
             reply = QMessageBox.warning(
                 self,
                 "Account Already Exists",
-                "An account already exists. Creating a new account will overwrite the existing one.\n\n"
-                "This will permanently delete all saved passwords!\n\n"
+                "An account already exists. Creating a new account will delete the existing "
+                "account and ALL saved passwords.\n\n"
+                "A backup copy of the current vault file will be saved next to it first.\n\n"
                 "Are you ABSOLUTELY sure you want to continue?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
             if reply != QMessageBox.Yes:
                 return
+            overwrite = True
 
         password = self.password_input.text()
 
@@ -279,16 +282,18 @@ class LoginWidget(QWidget):
             return
 
         # Attempt account creation
-        success, message = self.auth_manager.create_account(password)
+        success, message = self.auth_manager.create_account(password, overwrite=overwrite)
 
         if success:
-            QMessageBox.information(self, "Success",
-                                    "Account created successfully!\nYou can now login.")
             self.account_created.emit()
 
             # Auto-login
-            self.auth_manager.authenticate(password)
-            self.login_successful.emit()
+            logged_in, login_message = self.auth_manager.authenticate(password)
+            if logged_in:
+                QMessageBox.information(self, "Success", "Account created successfully!")
+                self.login_successful.emit()
+            else:
+                self.show_error(f"Account was created, but logging in failed:\n{login_message}")
         else:
             self.show_error(message)
 
@@ -298,8 +303,8 @@ class LoginWidget(QWidget):
         self.password_input.setText(password)
         self.check_password_strength(password)
 
-        # Show the password briefly
-        self.password_input.setEchoMode(QLineEdit.Normal)
+        # Show the password so the user can write it down
+        self.show_password_checkbox.setChecked(True)
         QMessageBox.information(
             self,
             "Password Generated",

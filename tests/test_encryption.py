@@ -9,7 +9,7 @@ import os
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.security.encryption import EncryptionEngine, EncryptionError, DecryptionError
+from security.encryption import EncryptionEngine, EncryptionError, DecryptionError
 
 
 @pytest.fixture

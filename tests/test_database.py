@@ -10,7 +10,7 @@ from datetime import datetime
 # Add parent directory to path so we can import from src
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.database.db_manager import DatabaseManager
+from database.db_manager import DatabaseManager
 
 
 @pytest.fixture
@@ -254,8 +254,8 @@ class TestBreachChecksTable:
 
         # Insert breach check
         db.execute_query(
-            "INSERT INTO breach_checks (password_id, breach_found, breach_count) VALUES (?, ?, ?)",
-            (1, 1, 12543)
+            "INSERT INTO breach_checks (password_id, user_id, breach_found, breach_count) VALUES (?, ?, ?, ?)",
+            (1, 1, 1, 12543)
         )
 
         count = db.get_table_count('breach_checks')
@@ -273,8 +273,8 @@ class TestBreachChecksTable:
             (1, b'test_pass')
         )
         db.execute_query(
-            "INSERT INTO breach_checks (password_id, breach_found, breach_count) VALUES (?, ?, ?)",
-            (1, 1, 12543)
+            "INSERT INTO breach_checks (password_id, user_id, breach_found, breach_count) VALUES (?, ?, ?, ?)",
+            (1, 1, 1, 12543)
         )
 
         # Fetch
