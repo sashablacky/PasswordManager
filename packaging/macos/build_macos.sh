@@ -97,12 +97,19 @@ rm -f "$DMG"
 
 # Preferred: dmgbuild, which lays out the window (background arrow "drag onto
 # Applications", icon positions). If it fails, a plain .dmg with the same files.
+DMGBUILD_LOG="$NOTES_DIR/dmgbuild.log"
 if python -m dmgbuild -s packaging/macos/dmg_settings.py \
         -D app="$APP" -D notes="$NOTES" -D background=packaging/macos/dmg-background.png \
-        "$APP_NAME" "$DMG"; then
+        "$APP_NAME" "$DMG" > "$DMGBUILD_LOG" 2>&1; then
+    cat "$DMGBUILD_LOG"
     echo "dmg laid out with dmgbuild"
 else
+    cat "$DMGBUILD_LOG"
     echo "dmgbuild failed, making a plain .dmg" >&2
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        # Show why in the run's annotations (the raw log needs admin rights)
+        tail -n 25 "$DMGBUILD_LOG" | python -c "import sys; t = sys.stdin.read().replace('%', '%25').replace('\r', '').replace('\n', '%0A'); print('::warning title=dmgbuild failed::' + t)"
+    fi
     rm -f "$DMG"
     STAGING="$(mktemp -d)"
     # ditto keeps symlinks, permissions and extended attributes, so the signature stays valid
