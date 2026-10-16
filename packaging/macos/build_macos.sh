@@ -93,7 +93,18 @@ STAGING="$(mktemp -d)"
 cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 rm -f "$DMG"
-hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+# hdiutil now and then fails with "Resource busy" (known on CI Macs): retry
+for attempt in 1 2 3; do
+    if hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG"; then
+        break
+    fi
+    if [[ $attempt -eq 3 ]]; then
+        echo "hdiutil failed three times" >&2
+        exit 1
+    fi
+    echo "hdiutil failed, retrying in 10 s..." >&2
+    sleep 10
+done
 rm -rf "$STAGING"
 
 echo

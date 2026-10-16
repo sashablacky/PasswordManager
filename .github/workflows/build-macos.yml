@@ -76,7 +76,12 @@ jobs:
           fi
 
       - name: Build app and dmg
-        run: ./packaging/macos/build_macos.sh --skip-install --skip-tests
+        run: |
+          set -o pipefail
+          if ! ./packaging/macos/build_macos.sh --skip-install --skip-tests 2>&1 | tee build.log; then
+            tail -n 40 build.log | python -c "import sys; t = sys.stdin.read().replace('%', '%25').replace('\r', '').replace('\n', '%0A'); print('::error title=Build failed::' + t)"
+            exit 1
+          fi
 
       - name: Check the bundle
         run: |
