@@ -1,0 +1,120 @@
+name: Diagnose macOS release
+
+# Reproduces "downloaded the .dmg, Open Anyway, nothing happens" on an Intel Mac
+# with macOS 15 (like the user's MacBook Air): downloads a released .dmg, marks
+# it as downloaded (quarantine), checks the signature and Gatekeeper, copies the
+# app to /Applications and starts it. The findings are published as annotations
+# of the run. Runs when this file changes and by hand.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/diagnose-macos.yml
+  workflow_dispatch:
+    inputs:
+      dmg_url:
+        description: URL of the .dmg to check
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      DMG_URL: ${{ inputs.dmg_url || 'https://github.com/sashablacky/PasswordManager/releases/download/v1.5.2/PasswordManager-1.5.2-macOS-Intel.dmg' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reproduce the download and the first start
+        run: |
+          set +e
+          R=report.txt
+          section() { printf '\n===== %s =====\n' "$1" >> $R; }
+          run() { echo "\$ $*" >> $R; "$@" >> $R 2>&1; echo "[exit $?]" >> $R; }
+
+          section "system"
+          run sw_vers
+          run uname -m
+
+          section "download"
+          curl -sSL -o pm.dmg "$DMG_URL"
+          run ls -l pm.dmg
+          # What a browser does to a downloaded file
+          xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" pm.dmg
+          run xattr -l pm.dmg
+
+          section "mount"
+          run hdiutil attach -nobrowse -readonly -mountpoint /tmp/pmdmg pm.dmg
+          run ls -la /tmp/pmdmg
+          APP_IN_DMG="/tmp/pmdmg/Password Manager.app"
+          run xattr -lr "$APP_IN_DMG/Contents/Info.plist"
+          run codesign --verify --deep --strict --verbose=4 "$APP_IN_DMG"
+          run codesign -dvvv "$APP_IN_DMG"
+          run spctl -a -vv -t exec "$APP_IN_DMG"
+
+          section "copy to /Applications (like dragging in Finder)"
+          sudo rm -rf "/Applications/Password Manager.app"
+          run ditto "$APP_IN_DMG" "/Applications/Password Manager.app"
+          APP="/Applications/Password Manager.app"
+          # Finder gives the copy the quarantine of the download
+          xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" "$APP"
+          run xattr -l "$APP"
+          run codesign --verify --deep --strict --verbose=4 "$APP"
+          run spctl -a -vv -t exec "$APP"
+          run plutil -p "$APP/Contents/Info.plist"
+          run ls -l "$APP/Contents/MacOS"
+          run python3 .github/scripts/check_macos_bundle.py "$APP"
+
+          section "start while quarantined (Gatekeeper decides)"
+          START=$(date '+%Y-%m-%d %H:%M:%S')
+          run open "$APP"
+          sleep 15
+          run pgrep -lf "Password Manager.app/Contents/MacOS"
+          pkill -f "Password Manager.app/Contents/MacOS"
+          echo "--- syspolicyd / Gatekeeper log ---" >> $R
+          log show --start "$START" --style compact \
+            --predicate 'process == "syspolicyd" OR process == "XprotectService" OR eventMessage CONTAINS[c] "Password Manager"' \
+            2>/dev/null | tail -n 60 >> $R
+
+          section "start after removing quarantine, through Launch Services"
+          run xattr -cr "$APP"
+          START=$(date '+%Y-%m-%d %H:%M:%S')
+          run open "$APP"
+          sleep 20
+          if pgrep -f "Password Manager.app/Contents/MacOS" >/dev/null; then
+            echo "RUNNING after 20 s" >> $R
+          else
+            echo "NOT RUNNING after 20 s" >> $R
+          fi
+          pkill -f "Password Manager.app/Contents/MacOS"
+          sleep 2
+          echo "--- system log ---" >> $R
+          log show --start "$START" --style compact \
+            --predicate 'eventMessage CONTAINS[c] "Password Manager" OR process == "Password Manager"' \
+            2>/dev/null | tail -n 40 >> $R
+
+          section "start the binary directly"
+          ( "$APP/Contents/MacOS/Password Manager" > direct.log 2>&1 & echo $! > pid )
+          sleep 20
+          if kill -0 "$(cat pid)" 2>/dev/null; then echo "RUNNING after 20 s" >> $R; kill "$(cat pid)"; else echo "EXITED" >> $R; fi
+          sleep 2
+          echo "--- stdout/stderr ---" >> $R
+          tail -n 60 direct.log >> $R
+
+          section "logs left behind"
+          run cat "$HOME/Library/Application Support/SecureVault/error.log"
+          run ls -la "$HOME/Library/Logs/DiagnosticReports"
+          for f in "$HOME"/Library/Logs/DiagnosticReports/*Password*; do
+            [ -f "$f" ] && { echo "--- $f ---" >> $R; head -n 80 "$f" >> $R; }
+          done
+
+          hdiutil detach /tmp/pmdmg >/dev/null 2>&1
+          exit 0
+
+      - name: Publish the report
+        if: always()
+        run: python3 .github/scripts/emit_report.py "macOS diagnosis" report.txt
