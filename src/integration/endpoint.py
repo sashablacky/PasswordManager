@@ -43,6 +43,21 @@ def default_endpoint() -> str:
     return os.path.join(get_data_dir(), SOCKET_NAME)
 
 
+SAFARI_APP_NAME = "SecureVault for Safari.app"
+
+
+def safari_extension_installed() -> bool:
+    """The Safari extension's container app is in Applications (docs/safari-install.md).
+
+    Without it there is nothing to listen for, so the program does not look
+    into ~/Library/Group Containers at all.
+    """
+    if sys.platform != "darwin":
+        return False
+    folders = ("/Applications", os.path.expanduser("~/Applications"))
+    return any(os.path.isdir(os.path.join(folder, SAFARI_APP_NAME)) for folder in folders)
+
+
 def safari_endpoints() -> List[str]:
     """Sockets for the Safari extension, one per App Group folder that exists"""
     if sys.platform != "darwin" or os.environ.get(ENDPOINT_ENV):

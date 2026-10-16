@@ -339,3 +339,90 @@ def test_app_icon_scales_for_the_mac_bundle(qapp):
     # The tile is drawn edge to edge, so the centre is opaque at every size
     assert big.toImage().pixelColor(512, 100).alpha() == 255
     assert not theme.app_icon().isNull()
+
+
+# ---------------------------------------------------------------- start-up errors
+
+def _raise_import_error():
+    try:
+        raise ImportError("dlopen(_ffi.abi3.so): built for macOS 15.0")
+    except ImportError:
+        return sys.exc_info()
+
+
+def test_startup_error_is_written_to_the_log(monkeypatch, tmp_path):
+    import main
+
+    log = tmp_path / "error.log"
+    alerts = []
+    monkeypatch.setattr(main, "get_log_path", lambda: str(log))
+    monkeypatch.setattr(main, "_mac_alert", lambda title, text: alerts.append(text))
+    monkeypatch.setattr(sys, "__excepthook__", lambda *a: None)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    main.report_startup_error(*_raise_import_error())
+
+    text = log.read_text(encoding="utf-8")
+    assert "could not start" in text and "built for macOS 15.0" in text and "Traceback" in text
+    assert alerts == []  # the Windows/source run has a console
+
+
+def test_startup_error_shows_an_alert_in_the_packaged_mac_app(monkeypatch, tmp_path):
+    import main
+
+    log = tmp_path / "error.log"
+    calls = []
+    monkeypatch.setattr(main, "get_log_path", lambda: str(log))
+    monkeypatch.setattr(sys, "__excepthook__", lambda *a: None)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(main.subprocess, "run", lambda args, **kw: calls.append(args))
+
+    main.report_startup_error(*_raise_import_error())
+
+    assert len(calls) == 1
+    args = calls[0]
+    assert args[0] == "osascript"
+    # Title and text go in as arguments, so quotes in the message cannot break the script
+    assert args[-2] == "Password Manager could not start"
+    assert "ImportError" in args[-1] and str(log) in args[-1]
+    assert log.exists()
+
+
+def test_importing_main_does_not_replace_the_excepthook():
+    import importlib
+    import main
+
+    before = sys.excepthook
+    importlib.reload(main)
+    assert sys.excepthook is before  # only the running program installs its hook
+
+
+# ---------------------------------------------------------------- browser bridge on macOS
+
+def test_safari_scan_only_with_the_safari_app_installed(monkeypatch, fake_home, tmp_path):
+    from integration import endpoint
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    real_isdir = os.path.isdir
+    installed = []
+    monkeypatch.setattr(os.path, "isdir",
+                        lambda p: p in installed or (not p.startswith("/Applications") and real_isdir(p)))
+    assert endpoint.safari_extension_installed() is False
+
+    installed.append(os.path.join("/Applications", "SecureVault for Safari.app"))
+    assert endpoint.safari_extension_installed() is True
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert endpoint.safari_extension_installed() is False
+
+
+def test_safari_scan_errors_do_not_escape(qapp, monkeypatch):
+    from integration import server
+
+    def broken():
+        raise PermissionError("Operation not permitted: Group Containers")
+    monkeypatch.setattr(server, "safari_endpoints", broken)
+    bridge = server.BridgeServer.__new__(server.BridgeServer)
+    bridge._servers = {}
+    bridge._listen_safari()  # logs a warning, does not raise

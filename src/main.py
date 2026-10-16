@@ -2,14 +2,68 @@ import sys
 import logging
 import os
 import shutil
+import subprocess
 import traceback
 from datetime import datetime
-from PyQt5.QtWidgets import QApplication, QMessageBox, QDialog
-from PyQt5.QtCore import Qt, QObject, QEvent, QTimer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app_paths import get_db_path, get_log_path
+# Only the standard library and app_paths so far, so that a failure in any
+# import below (Qt, cryptography, Argon2...) is still written to the log
+from app_paths import get_log_path
+
+
+def _mac_alert(title: str, message: str) -> None:
+    """A system alert without Qt (the packaged Mac app has no console)"""
+    try:
+        subprocess.run(
+            ["osascript",
+             "-e", "on run argv",
+             "-e", "display alert (item 1 of argv) message (item 2 of argv) as critical",
+             "-e", "end run",
+             title, message],
+            timeout=600, check=False)
+    except Exception:
+        pass
+
+
+def report_startup_error(exc_type, exc_value, exc_tb):
+    """Write an error that happened before the Qt window could show it to the
+    log, and in the packaged Mac app also show it in a system alert"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    log_path = "error.log"
+    try:
+        log_path = get_log_path()
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} - startup - CRITICAL - "
+                    f"Password Manager could not start:\n{text}\n")
+    except Exception:
+        pass
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+    if sys.platform == "darwin" and getattr(sys, "frozen", False):
+        _mac_alert("Password Manager could not start",
+                   f"{exc_type.__name__}: {exc_value}\n\nDetails were written to:\n{log_path}")
+
+
+_fault_log = None
+if __name__ == "__main__":  # the program itself, not the tests importing this module
+    sys.excepthook = report_startup_error
+    # A crash in native code (Qt, PyObjC) leaves no Python traceback: let
+    # faulthandler write the stack of every thread into the same log
+    try:
+        import faulthandler
+        _fault_log = open(get_log_path(), "a", encoding="utf-8")
+        faulthandler.enable(_fault_log)
+    except Exception:
+        pass
+
+from PyQt5.QtWidgets import QApplication, QMessageBox, QDialog
+from PyQt5.QtCore import Qt, QObject, QEvent, QTimer
+
+from app_paths import get_db_path
 from platform_utils import is_mac, restrict_file
 from version import __version__
 from database.db_manager import DatabaseManager
@@ -55,6 +109,9 @@ def handle_exception(exc_type, exc_value, exc_tb):
             None, "Unexpected Error",
             f"An unexpected error occurred:\n{exc_value}\n\nDetails were written to:\n{get_log_path()}"
         )
+    elif sys.platform == "darwin" and getattr(sys, "frozen", False):
+        _mac_alert("Password Manager could not start",
+                   f"{exc_type.__name__}: {exc_value}\n\nDetails were written to:\n{get_log_path()}")
 
 
 # Activity monitor to track user interaction

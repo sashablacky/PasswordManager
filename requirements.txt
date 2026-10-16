@@ -13,6 +13,9 @@ PyQt-Fluent-Widgets[full]==1.11.3
 # Cryptography
 cryptography==41.0.7
 argon2-cffi==23.1.0
+# macOS: newer bindings have no Intel wheel, so pip compiled them on the CI Mac
+# and the library then needed that macOS version; 21.2.0 ships wheels for 10.9+
+argon2-cffi-bindings==21.2.0; sys_platform == "darwin"
 
 # Database
 # SQLite is built into Python, no separate install needed

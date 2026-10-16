@@ -28,7 +28,10 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     # Development tools from requirements.txt that the app never imports
-    excludes=["tkinter", "pytest", "pytestqt", "pylint", "black", "mypy", "IPython"],
+    # numpy/scipy only serve the Fluent acrylic blur, which the app does not use and
+    # which qfluentwidgets imports inside try/except; their macOS wheels need 14.0+
+    excludes=["tkinter", "pytest", "pytestqt", "pylint", "black", "mypy", "IPython",
+              "numpy", "scipy"],
     noarchive=False,
 )
 

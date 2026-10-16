@@ -87,16 +87,42 @@ jobs:
         run: |
           APP="dist/Password Manager.app"
           plutil -p "$APP/Contents/Info.plist"
-          file "$APP/Contents/MacOS/Password Manager"
+          # Info.plist, bundle id, and no library that needs a newer macOS than the plist says
+          python .github/scripts/check_macos_bundle.py "$APP"
+
+      # What the user gets: the app inside the .dmg, copied out like in Finder,
+      # started through Launch Services. The process must still be alive after 20 s.
+      - name: Check the app from the .dmg
+        run: |
+          set -o pipefail
+          DMG=$(ls dist/*.dmg)
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/pmdmg "$DMG"
+          ls -la /tmp/pmdmg
+          test -f "/tmp/pmdmg/Как открыть в первый раз.rtf"
+          codesign --verify --deep --strict --verbose=2 "/tmp/pmdmg/Password Manager.app"
+          mkdir -p "$HOME/Applications"
+          rm -rf "$HOME/Applications/Password Manager.app"
+          ditto "/tmp/pmdmg/Password Manager.app" "$HOME/Applications/Password Manager.app"
+          hdiutil detach /tmp/pmdmg
+          APP="$HOME/Applications/Password Manager.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          # Start the app for a few seconds: it must not crash on start-up
-          "$APP/Contents/MacOS/Password Manager" &
-          PID=$!
-          sleep 15
-          if ! kill -0 $PID 2>/dev/null; then
-            echo "The app exited during start-up"; wait $PID; exit 1
+          # Ad hoc signed, so Gatekeeper is expected to reject it; printed for the record
+          spctl -a -vv -t exec "$APP" || true
+          rm -f "$HOME/Library/Application Support/SecureVault/error.log"
+          open "$APP"
+          sleep 20
+          if ! pgrep -f "Password Manager.app/Contents/MacOS" >/dev/null; then
+            echo "::error title=App from the .dmg::not running 20 s after start"
+            cat "$HOME/Library/Application Support/SecureVault/error.log" || true
+            ls -la "$HOME/Library/Logs/DiagnosticReports" || true
+            exit 1
           fi
-          kill $PID
+          pkill -f "Password Manager.app/Contents/MacOS"
+          if grep -q "could not start" "$HOME/Library/Application Support/SecureVault/error.log" 2>/dev/null; then
+            echo "::error title=App from the .dmg::start-up error in error.log"
+            cat "$HOME/Library/Application Support/SecureVault/error.log"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v7
         with:

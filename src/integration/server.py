@@ -14,7 +14,7 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QMessageBox
 
 from integration import protocol
-from integration.endpoint import default_endpoint, safari_endpoints
+from integration.endpoint import default_endpoint, safari_endpoints, safari_extension_installed
 from integration.protocol import ProtocolError
 from integration.service import BridgeService, BridgeUI
 
@@ -36,7 +36,7 @@ class BridgeServer(QObject):
 
     def start(self, endpoint: str = None) -> bool:
         ok = self._listen(endpoint or default_endpoint())
-        if sys.platform == "darwin" and endpoint is None:
+        if sys.platform == "darwin" and endpoint is None and safari_extension_installed():
             self._listen_safari()
             # The Safari extension's folder appears when it is first used
             self._rescan_timer = QTimer(self)
@@ -58,9 +58,14 @@ class BridgeServer(QObject):
         return any(server.isListening() for server in self._servers.values())
 
     def _listen_safari(self) -> None:
-        for name in safari_endpoints():
-            if name not in self._servers:
-                self._listen(name)
+        # Runs at start-up and from a timer: a problem here must never reach the
+        # program (an exception in a Qt slot would show an error box every 30 s)
+        try:
+            for name in safari_endpoints():
+                if name not in self._servers:
+                    self._listen(name)
+        except Exception as e:
+            logger.warning(f"Browser bridge: Safari endpoints not available: {e}")
 
     def _listen(self, name: str) -> bool:
         if _endpoint_in_use(name):

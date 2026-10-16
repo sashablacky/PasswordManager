@@ -90,8 +90,11 @@ codesign --verify --deep --strict "$APP"
 # .dmg with the app and a link to /Applications, so it can be dragged across
 DMG="dist/PasswordManager-$VERSION-macOS-$MAC_KIND.dmg"
 STAGING="$(mktemp -d)"
-cp -R "$APP" "$STAGING/"
+# ditto keeps symlinks, permissions and extended attributes, so the signature stays valid
+ditto "$APP" "$STAGING/$APP_NAME.app"
 ln -s /Applications "$STAGING/Applications"
+# Step-by-step first start in large type, next to the app
+python packaging/macos/make_first_launch_rtf.py "$STAGING/Как открыть в первый раз.rtf"
 rm -f "$DMG"
 # hdiutil now and then fails with "Resource busy" (known on CI Macs): retry
 for attempt in 1 2 3; do
