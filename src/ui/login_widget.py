@@ -1,17 +1,67 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QPushButton, QMessageBox, QCheckBox,
-                             QInputDialog, QDialog, QDialogButtonBox, QFormLayout)
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QMessageBox, QDialog)
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF
+from PyQt5.QtGui import QFont, QPainter, QColor
 
-from database.db_manager import DatabaseManager
-from security.encryption import EncryptionEngine
+from qfluentwidgets import FluentWidget, TransparentPushButton, PushButton
 from security.generator import PasswordGenerator
-from managers.auth_manager import AuthenticationManager
+from ui import theme
+from ui.icons import AppIcon
 
 
-class LoginWidget(QWidget):
-    """Login and account creation widget"""
+class LogoTile(theme.ThemedWidget):
+    """Accent-coloured tile with a lock, shown at the top of the login card"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(56, 56)
+
+    def paintEvent(self, e):
+        p = theme.current()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(p.accent))
+        painter.drawRoundedRect(QRectF(self.rect()), 14, 14)
+        AppIcon.LOCK.render(painter, QRectF(14, 14, 28, 28), fill=p.on_accent)
+
+
+class Note(theme.WellFrame):
+    """Small boxed hint with a warning icon"""
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent, radius=8, alpha=0.35)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+        self.icon = IconLabel(AppIcon.WARNING, "warn", 16)
+        layout.addWidget(self.icon, 0, Qt.AlignTop)
+        self.text_label = theme.label(text, role="muted", size=12)
+        self.text_label.setWordWrap(True)
+        layout.addWidget(self.text_label, 1)
+
+    def setText(self, text):
+        self.text_label.setText(text)
+
+    def set_icon(self, icon, role):
+        self.icon.icon, self.icon.role = icon, role
+        self.icon.update()
+
+
+class IconLabel(theme.ThemedWidget):
+    def __init__(self, icon, role=None, size=16, parent=None):
+        super().__init__(parent)
+        self.icon, self.role = icon, role
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, e):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = theme.current().color(self.role) if self.role else QColor(theme.current().text)
+        self.icon.render(painter, QRectF(self.rect()), fill=color.name())
+
+
+class LoginWidget(FluentWidget):
+    """Login and account creation window"""
 
     login_successful = pyqtSignal()
     account_created = pyqtSignal()
@@ -23,169 +73,93 @@ class LoginWidget(QWidget):
         self.account_exists = False
         self.setup_ui()
         self.check_account_exists()
+        theme.signals.changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self, key):
+        try:
+            self.update()
+        except RuntimeError:
+            pass
 
     def setup_ui(self):
         """Set up the user interface"""
-        self.setWindowTitle("Password Manager - Login")
+        self.setWindowTitle("Password Manager")
+        self.setWindowIcon(theme.app_icon())
         # Fits small laptop screens (1366x768); the user can still enlarge it
         self.setMinimumSize(460, 600)
         self.resize(520, 680)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f5f7fa;
-            }
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                font-size: 14px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border-color: #667eea;
-            }
-            QPushButton {
-                padding: 12px;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QLabel {
-                color: #2c3e50;
-            }
-        """)
 
-        # Main layout
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(40, 40, 40, 40)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, self.titleBar.height() + 8, 24, 24)
+        outer.addStretch(1)
 
-        # Logo/Title
-        title_label = QLabel("🔐 Password Manager")
-        title_font = QFont()
-        title_font.setPointSize(28)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #667eea; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        card = theme.GlassCard(radius=12)
+        card.setMaximumWidth(420)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(34, 34, 34, 28)
+        layout.setSpacing(14)
 
-        # Subtitle
-        subtitle_label = QLabel("Secure • Local • Private")
-        subtitle_font = QFont()
-        subtitle_font.setPointSize(12)
-        subtitle_label.setFont(subtitle_font)
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        subtitle_label.setStyleSheet("color: #7f8c8d; margin-bottom: 30px;")
-        layout.addWidget(subtitle_label)
+        layout.addWidget(LogoTile(), 0, Qt.AlignLeft)
 
-        # Master password label
-        password_label = QLabel("Master Password:")
-        password_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(password_label)
+        self.title_label = theme.label("Unlock your vault", size=26, weight=QFont.DemiBold, display=True)
+        layout.addWidget(self.title_label)
+        subtitle = theme.label("Secure · Local · Private", role="muted", size=13)
+        layout.addWidget(subtitle)
+        layout.addSpacing(4)
 
-        # Password input
-        self.password_input = QLineEdit()
-        self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setPlaceholderText("Enter your master password")
-        self.password_input.setMinimumHeight(45)
+        # Master password
+        self.password_input = theme.reveal_line_edit()
+        self.password_input.setPlaceholderText("Master password")
+        self.password_input.setMinimumHeight(40)
         self.password_input.returnPressed.connect(self.on_return_pressed)
         layout.addWidget(self.password_input)
 
-        # Show/Hide password checkbox
-        self.show_password_checkbox = QCheckBox("Show password")
-        self.show_password_checkbox.setStyleSheet("font-size: 12px; color: #7f8c8d;")
-        self.show_password_checkbox.stateChanged.connect(self.toggle_password_visibility)
-        layout.addWidget(self.show_password_checkbox)
-
-        # Password strength indicator (for account creation)
-        self.strength_label = QLabel("")
-        self.strength_label.setAlignment(Qt.AlignCenter)
-        self.strength_label.setStyleSheet("font-size: 12px; padding: 8px; border-radius: 5px;")
+        # Strength of a new master password (account creation only)
+        self.strength_bar = theme.StrengthBar()
+        self.strength_label = theme.label("", role="muted", size=12)
+        self.strength_bar.hide()
         self.strength_label.hide()
+        layout.addWidget(self.strength_bar)
         layout.addWidget(self.strength_label)
 
-        layout.addSpacing(10)
-
-        # Login button
-        self.login_button = QPushButton("Login")
-        self.login_button.setMinimumHeight(45)
-        self.login_button.setCursor(Qt.PointingHandCursor)
-        self.login_button.setStyleSheet("""
-            QPushButton {
-                background-color: #667eea;
-                color: white;
-                border: none;
-            }
-            QPushButton:hover {
-                background-color: #5568d3;
-            }
-            QPushButton:pressed {
-                background-color: #4c5fc7;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
+        # Unlock (login mode) or create (first start) - only one of them is shown
+        self.login_button = theme.primary_button("Unlock")
+        self.login_button.setMinimumHeight(40)
         self.login_button.clicked.connect(self.on_login_clicked)
         layout.addWidget(self.login_button)
 
-        # Create account button
-        self.create_account_button = QPushButton("Create New Account")
-        self.create_account_button.setMinimumHeight(45)
-        self.create_account_button.setCursor(Qt.PointingHandCursor)
-        self.create_account_button.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                color: #667eea;
-                border: 2px solid #667eea;
-            }
-            QPushButton:hover {
-                background-color: #f0f3ff;
-            }
-        """)
+        self.create_account_button = theme.primary_button("Create vault")
+        self.create_account_button.setMinimumHeight(40)
         self.create_account_button.clicked.connect(self.on_create_account_clicked)
         layout.addWidget(self.create_account_button)
 
-        # Generate password button (for account creation)
-        self.generate_btn = QPushButton("🎲 Generate Strong Password")
-        self.generate_btn.setMinimumHeight(35)
-        self.generate_btn.setCursor(Qt.PointingHandCursor)
-        self.generate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa;
-                color: #2c3e50;
-                border: 1px solid #ddd;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #e9ecef;
-            }
-        """)
+        links = QHBoxLayout()
+        links.setSpacing(4)
+        # Login mode: start over with a new vault (deletes the old one after a warning)
+        self.reset_button = TransparentPushButton("Reset vault…")
+        self.reset_button.setToolTip("Delete this vault and create a new one")
+        self.reset_button.clicked.connect(self.on_create_account_clicked)
+        links.addWidget(self.reset_button)
+        links.addStretch(1)
+        # Account creation: generate a strong master password
+        self.generate_btn = TransparentPushButton(AppIcon.DICE, "Generate a strong password")
         self.generate_btn.clicked.connect(self.generate_password)
-        self.generate_btn.hide()  # Hide initially
-        layout.addWidget(self.generate_btn)
+        links.addWidget(self.generate_btn)
+        layout.addLayout(links)
 
-        # Info label
-        self.info_label = QLabel("⚠️ Remember your master password!\nIt cannot be recovered if forgotten.")
-        self.info_label.setAlignment(Qt.AlignCenter)
-        self.info_label.setStyleSheet("""
-            color: #e74c3c;
-            font-size: 11px;
-            padding: 12px;
-            background-color: #fee;
-            border-radius: 8px;
-            margin-top: 20px;
-        """)
-        self.info_label.setWordWrap(True)
+        self.info_label = Note("The master password cannot be recovered. "
+                               "If you forget it, the vault stays locked for good.")
         layout.addWidget(self.info_label)
 
-        layout.addStretch()
-
-        self.setLayout(layout)
+        outer.addWidget(card, 0, Qt.AlignHCenter)
+        outer.addStretch(1)
 
         # Set focus to password input
         self.password_input.setFocus()
+
+    def paintEvent(self, e):
+        painter = QPainter(self)
+        theme.paint_backdrop(painter, self.rect(), opacity=0.6 if self.isMicaEffectEnabled() else 1.0)
 
     def check_account_exists(self):
         """Check if an account exists and update UI accordingly"""
@@ -193,26 +167,21 @@ class LoginWidget(QWidget):
 
         if self.account_exists:
             # Account exists - show login mode
-            self.create_account_button.setText("Reset Vault and Create New Account")
-            self.info_label.show()
+            self.title_label.setText("Unlock your vault")
+            self.create_account_button.hide()
+            self.reset_button.show()
             self.generate_btn.hide()
         else:
             # No account - show account creation mode
+            self.title_label.setText("Create your vault")
             self.login_button.hide()
+            self.reset_button.hide()
             self.password_input.textChanged.connect(self.on_password_changed)
             self.info_label.setText(
-                "🔐 Create your master password.\n"
-                "At least 12 characters mixing letters, numbers and symbols,\n"
-                "or a passphrase of 16+ characters (e.g. four random words)."
+                "Choose a master password: at least 12 characters mixing letters, numbers "
+                "and symbols, or a passphrase of 16+ characters (e.g. four random words). "
+                "It cannot be recovered if forgotten."
             )
-            self.info_label.setStyleSheet("""
-                color: #667eea;
-                font-size: 11px;
-                padding: 12px;
-                background-color: #e3f2fd;
-                border-radius: 8px;
-                margin-top: 20px;
-            """)
             self.generate_btn.show()
 
     def on_password_changed(self, text):
@@ -220,6 +189,7 @@ class LoginWidget(QWidget):
         if text:
             self.check_password_strength(text)
         else:
+            self.strength_bar.hide()
             self.strength_label.hide()
 
     def on_return_pressed(self):
@@ -248,7 +218,7 @@ class LoginWidget(QWidget):
             self.password_input.setFocus()
 
     def on_create_account_clicked(self):
-        """Handle create account button click"""
+        """Handle create account / reset vault"""
         overwrite = False
         if self.auth_manager.account_exists():
             # Account exists - warn user
@@ -304,7 +274,7 @@ class LoginWidget(QWidget):
         self.check_password_strength(password)
 
         # Show the password so the user can write it down
-        self.show_password_checkbox.setChecked(True)
+        self.password_input.setPasswordVisible(True)
         QMessageBox.information(
             self,
             "Password Generated",
@@ -317,82 +287,50 @@ class LoginWidget(QWidget):
         """Show dialog to confirm password"""
         dialog = QDialog(self)
         dialog.setWindowTitle("Confirm Password")
-        dialog.setFixedSize(400, 200)
+        dialog.setFixedSize(400, 190)
 
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
 
-        label = QLabel("Please re-enter your master password:")
-        label.setStyleSheet("font-size: 12px;")
-        layout.addWidget(label)
+        layout.addWidget(theme.label("Please re-enter your master password:", size=13))
 
-        password_input = QLineEdit()
-        password_input.setEchoMode(QLineEdit.Password)
+        password_input = theme.reveal_line_edit()
         password_input.setPlaceholderText("Re-enter password")
+        password_input.returnPressed.connect(dialog.accept)
         layout.addWidget(password_input)
+        layout.addStretch(1)
 
-        # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        ok_button = theme.primary_button("OK")
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button = PushButton("Cancel")
+        cancel_button.clicked.connect(dialog.reject)
+        buttons.addWidget(ok_button)
+        buttons.addWidget(cancel_button)
+        layout.addLayout(buttons)
 
-        dialog.setLayout(layout)
-
+        password_input.setFocus()
         result = dialog.exec_()
         return password_input.text(), result == QDialog.Accepted
 
     def check_password_strength(self, password):
         """Check and display password strength"""
         strength = self.generator.calculate_strength_score(password)
-        entropy = self.generator.calculate_entropy(password)
         crack_info = self.generator.estimate_crack_time(password)
 
-        if strength < 30:
-            self.strength_label.setText(f"⚠️ Very Weak - {crack_info['time_string']}")
-            self.strength_label.setStyleSheet("""
-                background-color: #e74c3c;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 8px;
-            """)
-        elif strength < 50:
-            self.strength_label.setText(f"⚠️ Weak - {crack_info['time_string']}")
-            self.strength_label.setStyleSheet("""
-                background-color: #e67e22;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 8px;
-            """)
-        elif strength < 75:
-            self.strength_label.setText(f"✓ Medium - {crack_info['time_string']}")
-            self.strength_label.setStyleSheet("""
-                background-color: #f39c12;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 8px;
-            """)
-        else:
-            self.strength_label.setText(f"✓ Strong - {crack_info['time_string']}")
-            self.strength_label.setStyleSheet("""
-                background-color: #27ae60;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 8px;
-            """)
-
+        self.strength_bar.set_score(strength)
+        self.strength_label.setText(f"{theme.strength_text(strength)} · cracked in {crack_info['time_string']}")
+        self.strength_label.setProperty("role", theme.strength_role(strength))
+        self.strength_label.style().unpolish(self.strength_label)
+        self.strength_label.style().polish(self.strength_label)
+        self.strength_bar.show()
         self.strength_label.show()
 
     def toggle_password_visibility(self, state):
-        """Toggle password visibility"""
-        if state == Qt.Checked:
-            self.password_input.setEchoMode(QLineEdit.Normal)
-        else:
-            self.password_input.setEchoMode(QLineEdit.Password)
+        """Show or hide the master password"""
+        self.password_input.setPasswordVisible(state == Qt.Checked or state is True)
 
     def show_error(self, message):
         """Show error message"""
@@ -401,44 +339,6 @@ class LoginWidget(QWidget):
     def clear_form(self):
         """Clear the form"""
         self.password_input.clear()
-        self.show_password_checkbox.setChecked(False)
+        self.password_input.setPasswordVisible(False)
+        self.strength_bar.hide()
         self.strength_label.hide()
-
-
-# Test the login widget
-if __name__ == '__main__':
-    import sys
-    from PyQt5.QtWidgets import QApplication
-    from database.db_manager import DatabaseManager
-    from security.encryption import EncryptionEngine
-    from managers.auth_manager import AuthenticationManager
-
-    app = QApplication(sys.argv)
-
-    # Setup
-    db = DatabaseManager('password_vault.db')
-    db.connect()
-    db.create_tables()
-
-    encryption = EncryptionEngine()
-    auth = AuthenticationManager(db, encryption)
-
-    # Create and show login widget
-    login_widget = LoginWidget(auth)
-
-
-    def on_login_success():
-        print("✓ Login successful!")
-        QMessageBox.information(login_widget, "Success", "Login successful!")
-
-
-    def on_account_created():
-        print("✓ Account created!")
-
-
-    login_widget.login_successful.connect(on_login_success)
-    login_widget.account_created.connect(on_account_created)
-
-    login_widget.show()
-
-    sys.exit(app.exec_())

@@ -2,6 +2,8 @@
 PyQt5==5.15.10
 PyQt5-Qt5==5.15.2
 PyQt5-sip==12.13.0
+# Fluent Design widgets (window, navigation, themes) on PyQt5
+PyQt-Fluent-Widgets[full]==1.11.3
 
 # Cryptography
 cryptography==41.0.7

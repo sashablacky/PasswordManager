@@ -1,4 +1,5 @@
-from PyQt5.QtWidgets import QWidget, QScrollArea, QFrame, QVBoxLayout, QApplication
+from PyQt5.QtWidgets import QWidget, QFrame, QVBoxLayout, QApplication
+from qfluentwidgets import ScrollArea
 
 
 def resize_to_fit_screen(window, width, height, margin=40):
@@ -21,11 +22,12 @@ def set_scrollable_layout(dialog, content_layout, footer=None, footer_alignment=
     content.setObjectName("scrollContent")
     content.setLayout(content_layout)
 
-    scroll = QScrollArea()
+    scroll = ScrollArea()  # Fluent scroll bars
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setWidget(content)
-    scroll.setStyleSheet("QScrollArea, #scrollContent { background: transparent; }")
+    scroll.setStyleSheet("QScrollArea, #scrollContent { background: transparent; border: none; }")
+    scroll.viewport().setStyleSheet("background: transparent;")
 
     outer = QVBoxLayout()
     outer.setContentsMargins(0, 0, 0, 0)

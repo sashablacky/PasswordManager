@@ -120,13 +120,14 @@ def test_search_survives_refresh_and_filter_works(app, monkeypatch):
 
     window.search_input.setText("bank")
     window.refresh_data()
-    assert window.password_table.rowCount() == 1
-    assert window.password_table.item(0, 0).text() == "Bank"
+    assert window.entry_list.count() == 1
+    assert window.entry_title(0) == "Bank"
 
+    # The strength filter moved from a combo box to the count chips above the list
     window.search_input.setText("")
-    window.filter_combo.setCurrentText("Strong")
-    assert window.password_table.rowCount() == 1
-    assert window.password_table.item(0, 0).text() == "Mail"
+    window.strength_chips["Strong"].click()
+    assert window.entry_list.count() == 1
+    assert window.entry_title(0) == "Mail"
 
 
 def test_restore_backup_requires_new_login(app, monkeypatch, tmp_path):

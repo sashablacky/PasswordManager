@@ -1,17 +1,17 @@
-import re
 from urllib.parse import urlparse
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QComboBox, QTextEdit,
-    QDialogButtonBox, QMessageBox, QCheckBox
+    QDialog, QVBoxLayout, QHBoxLayout, QMessageBox, QWidget
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QPainter
 
+from qfluentwidgets import LineEdit, ComboBox, TextEdit, CheckBox, PushButton, FluentIcon
 from security.generator import PasswordGenerator, GeneratorOptions
+from ui import theme
 from ui.clipboard import copy_secret
-from ui.layout_utils import set_scrollable_layout
+from ui.icons import AppIcon
+from ui.layout_utils import set_scrollable_layout, resize_to_fit_screen
 
 
 class AddPasswordDialog(QDialog):
@@ -20,8 +20,8 @@ class AddPasswordDialog(QDialog):
     password_added = pyqtSignal(int)
     password_updated = pyqtSignal(int)
 
-    def __init__(self, password_manager, user_id, categories=None, password_data=None):
-        super().__init__()
+    def __init__(self, password_manager, user_id, categories=None, password_data=None, parent=None):
+        super().__init__(parent)
 
         self.password_manager = password_manager
         self.user_id = user_id
@@ -41,126 +41,116 @@ class AddPasswordDialog(QDialog):
     # -------------------------
     def setup_ui(self):
         self.setWindowTitle("Add Password" if not self.is_edit else "Edit Password")
+        self.setWindowIcon(theme.app_icon())
         # Fits small laptop screens (1366x768); the user can still enlarge it
-        self.setMinimumSize(520, 640)
-        self.resize(620, 700)
-
-        self.setStyleSheet("""
-            QDialog { background-color: #f5f7fa; }
-            QLineEdit, QTextEdit, QComboBox {
-                padding: 10px;
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                font-size: 14px;
-                background-color: white;
-            }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus {
-                border-color: #667eea;
-            }
-            QLabel {
-                color: #2c3e50;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
+        self.setMinimumSize(520, 600)
+        resize_to_fit_screen(self, 560, 720)
 
         layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(6)
+        layout.setContentsMargins(30, 26, 30, 10)
 
-        title_label = QLabel("🔐 Add New Password" if not self.is_edit else "🔐 Edit Password")
-        font = QFont()
-        font.setPointSize(20)
-        font.setBold(True)
-        title_label.setFont(font)
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #667eea; margin-bottom: 20px;")
-        layout.addWidget(title_label)
-
-        form = QVBoxLayout()
-        form.setSpacing(10)
+        header = QHBoxLayout()
+        header.setSpacing(14)
+        self.avatar = theme.Avatar("", size=44, radius=11)
+        header.addWidget(self.avatar)
+        title_label = theme.label("New password" if not self.is_edit else "Edit password",
+                                  size=22, weight=QFont.DemiBold, display=True)
+        header.addWidget(title_label, 1)
+        layout.addLayout(header)
+        layout.addSpacing(12)
 
         # Title (filled in from the URL if left empty)
-        form.addWidget(QLabel("Title"))
-        self.title_input = QLineEdit()
+        layout.addWidget(self._field_label("Title"))
+        self.title_input = LineEdit()
         self.title_input.setPlaceholderText("e.g. My Bank (taken from the URL if empty)")
-        form.addWidget(self.title_input)
+        self.title_input.textChanged.connect(self.update_avatar)
+        layout.addWidget(self.title_input)
 
         # Username
-        form.addWidget(QLabel("Username/Email"))
-        self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter username or email")
-        form.addWidget(self.username_input)
+        layout.addWidget(self._field_label("Username / email"))
+        self.username_input = LineEdit()
+        self.username_input.setPlaceholderText("Optional (not needed for PIN codes or Wi-Fi)")
+        layout.addWidget(self.username_input)
 
         # Password
-        form.addWidget(QLabel("Password *"))
+        layout.addWidget(self._field_label("Password *"))
         pw_layout = QHBoxLayout()
-
-        self.password_input = QLineEdit()
-        self.password_input.setEchoMode(QLineEdit.Password)
+        pw_layout.setSpacing(8)
+        self.password_input = theme.reveal_line_edit()
         self.password_input.setPlaceholderText("Enter password")
-        pw_layout.addWidget(self.password_input)
+        pw_layout.addWidget(self.password_input, 1)
 
-        generate_btn = QPushButton("🎲 Generate")
-        generate_btn.setFixedWidth(110)
+        generate_btn = PushButton(AppIcon.DICE, "Generate")
         generate_btn.clicked.connect(self.generate_password)
-        generate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 10px;
-            }
-            QPushButton:hover { background-color: #2980b9; }
-        """)
         pw_layout.addWidget(generate_btn)
-
-        form.addLayout(pw_layout)
-
-        # Show password
-        self.show_password_cb = QCheckBox("Show password")
-        self.show_password_cb.stateChanged.connect(self.toggle_password_visibility)
-        form.addWidget(self.show_password_cb)
+        layout.addLayout(pw_layout)
 
         # Strength
-        self.strength_label = QLabel("")
-        self.strength_label.setAlignment(Qt.AlignCenter)
-        form.addWidget(self.strength_label)
+        strength_row = QHBoxLayout()
+        strength_row.setSpacing(10)
+        self.strength_bar = theme.StrengthBar()
+        strength_row.addWidget(self.strength_bar, 1)
+        self.strength_label = theme.label("", role="muted", size=12)
+        strength_row.addWidget(self.strength_label)
+        self.strength_widgets = (self.strength_bar, self.strength_label)
+        layout.addSpacing(2)
+        layout.addLayout(strength_row)
 
         # URL
-        form.addWidget(QLabel("URL"))
-        self.url_input = QLineEdit()
+        layout.addWidget(self._field_label("Website"))
+        self.url_input = LineEdit()
         self.url_input.setPlaceholderText("https://example.com")
-        form.addWidget(self.url_input)
+        self.url_input.textChanged.connect(self.update_avatar)
+        layout.addWidget(self.url_input)
 
         # Category
-        form.addWidget(QLabel("Category"))
-        self.category_combo = QComboBox()
-        self.category_combo.addItem("None", None)
-        form.addWidget(self.category_combo)
+        layout.addWidget(self._field_label("Category"))
+        self.category_combo = ComboBox()
+        self.category_combo.addItem("None", userData=None)
+        layout.addWidget(self.category_combo)
 
         # Notes
-        form.addWidget(QLabel("Notes"))
-        self.notes_input = QTextEdit()
-        self.notes_input.setMaximumHeight(80)
-        form.addWidget(self.notes_input)
+        layout.addWidget(self._field_label("Notes"))
+        self.notes_input = TextEdit()
+        self.notes_input.setFixedHeight(80)
+        layout.addWidget(self.notes_input)
 
         # Favorite
-        self.favorite_cb = QCheckBox("⭐ Mark as favorite")
-        form.addWidget(self.favorite_cb)
+        layout.addSpacing(6)
+        self.favorite_cb = CheckBox("Add to favorites")
+        layout.addWidget(self.favorite_cb)
 
-        layout.addLayout(form)
         layout.addStretch()
 
         # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.save_password)
-        buttons.rejected.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self.save_button = theme.primary_button("Save", FluentIcon.SAVE)
+        self.save_button.clicked.connect(self.save_password)
+        buttons.addWidget(self.save_button)
+        cancel_button = PushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        buttons.addWidget(cancel_button)
+        footer = QWidget()
+        footer.setLayout(buttons)
+        buttons.setContentsMargins(0, 0, 0, 0)
 
         # Scrollable form with the buttons always visible (fits small screens)
-        set_scrollable_layout(self, layout, buttons)
+        set_scrollable_layout(self, layout, footer)
 
         self.password_input.textChanged.connect(self.update_strength)
+        self.update_strength()
+
+    def paintEvent(self, e):
+        painter = QPainter(self)
+        theme.paint_backdrop(painter, self.rect())
+
+    @staticmethod
+    def _field_label(text):
+        widget = theme.label(text, role="muted", size=13)
+        widget.setContentsMargins(0, 8, 0, 0)
+        return widget
 
     # -------------------------
     # Helpers
@@ -181,14 +171,20 @@ class AddPasswordDialog(QDialog):
         except Exception:
             return "Unknown"
 
+    def update_avatar(self):
+        url = self.url_input.text().strip()
+        title = self.title_input.text().strip() or (self.extract_title_from_url(url) if url else "")
+        self.avatar.set_title(title or "?")
+
     # -------------------------
     # Data
     # -------------------------
     def load_categories(self):
         for c in self.categories:
             self.category_combo.addItem(
-                f"{c.get('icon', '📁')} {c['name']}",
-                c['category_id']
+                c['name'],
+                icon=theme.dot_icon(theme.category_color(c.get('color'))),
+                userData=c['category_id']
             )
 
     def load_password_data(self):
@@ -196,7 +192,7 @@ class AddPasswordDialog(QDialog):
         self.username_input.setText(getattr(self.password_data, 'username', ''))
         self.password_input.setText(getattr(self.password_data, 'password', ''))
         self.url_input.setText(getattr(self.password_data, 'url', ''))
-        self.notes_input.setText(getattr(self.password_data, 'notes', ''))
+        self.notes_input.setPlainText(getattr(self.password_data, 'notes', ''))
         self.favorite_cb.setChecked(getattr(self.password_data, 'is_favorite', False))
 
         if self.password_data.category_id:
@@ -233,49 +229,27 @@ class AddPasswordDialog(QDialog):
             copy_secret(password)
 
     def toggle_password_visibility(self, state):
-        if state == Qt.Checked:
-            self.password_input.setEchoMode(QLineEdit.Normal)
-        else:
-            self.password_input.setEchoMode(QLineEdit.Password)
+        self.password_input.setPasswordVisible(state == Qt.Checked or state is True)
 
     def update_strength(self):
-        """Update password strength indicator (same style as generator dialog)"""
+        """Update password strength indicator (same style as the generator)"""
         password = self.password_input.text()
 
         if not password:
-            self.strength_label.setText("")
-            self.strength_label.hide()
-            return
-
-        strength = self.generator.calculate_strength_score(password)
-        crack_info = self.generator.estimate_crack_time(password)
-
-        if strength < 30:
-            color = "#e74c3c"
-            text = "Very Weak"
-        elif strength < 50:
-            color = "#e67e22"
-            text = "Weak"
-        elif strength < 75:
-            color = "#f39c12"
-            text = "Medium"
+            self.strength_bar.set_score(0)
+            self.strength_label.setText("Strength")
+            self.strength_label.setProperty("role", "faint")
         else:
-            color = "#27ae60"
-            text = "Strong"
+            strength = self.generator.calculate_strength_score(password)
+            crack_info = self.generator.estimate_crack_time(password)
+            self.strength_bar.set_score(strength)
+            self.strength_label.setText(
+                f"{theme.strength_text(strength)} ({strength}/100) · {crack_info['time_string']}"
+            )
+            self.strength_label.setProperty("role", theme.strength_role(strength))
 
-        self.strength_label.setText(
-            f"Strength: {text} ({strength}/100) - {crack_info['time_string']}"
-        )
-
-        self.strength_label.setStyleSheet(f"""
-            background-color: {color};
-            color: white;
-            font-weight: bold;
-            border-radius: 5px;
-            padding: 8px;
-        """)
-
-        self.strength_label.show()
+        self.strength_label.style().unpolish(self.strength_label)
+        self.strength_label.style().polish(self.strength_label)
 
     # -------------------------
     # Save

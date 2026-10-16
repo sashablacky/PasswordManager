@@ -1,0 +1,497 @@
+<title>Макет Fluent Glass</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: страница-витрина одного макета. Сверху палитра и переключатель экранов, ниже окно программы 1200×760, масштабируемое под ширину, внизу план переноса на PyQt5. Тема одна, тёмная: так задумана палитра. */
+:root {
+  /* Палитра 1, Midnight (по умолчанию) */
+  --n0: #010736;          /* самый глубокий тон, фон */
+  --n1: #0D1C42;          /* панели */
+  --n2: #22396F;          /* стекло, выделение */
+  --accent: #FCF1D0;      /* главная кнопка */
+  --on-accent: #010736;
+  --accent2: #FCF1D0;     /* индикаторы, ссылки */
+  --text: #F3ECDC;
+  --well: #010736;        /* поля ввода */
+  --page: #030822;
+  --muted: color-mix(in srgb, var(--text) 60%, transparent);
+  --faint: color-mix(in srgb, var(--text) 40%, transparent);
+  --glass: color-mix(in srgb, var(--n2) 30%, transparent);
+  --glass-line: color-mix(in srgb, var(--text) 12%, transparent);
+  --glass-hi: color-mix(in srgb, var(--text) 7%, transparent);
+  --ok: #8FD9B6;
+  --warn: #F3C77A;
+  --high: #F6B38A;
+  --bad: #F29A93;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", monospace;
+  color-scheme: dark;
+}
+/* Палитра 2, тёмный вариант */
+:root[data-pal="slate"] {
+  --n0: #16222F; --n1: #213448; --n2: #547792;
+  --accent: #EAE0CF; --on-accent: #213448; --accent2: #94B4C1;
+  --text: #EDF0F1; --well: #121C28; --page: #0F1821;
+  --glass: color-mix(in srgb, var(--n2) 26%, transparent);
+  --ok: #8FD9B6; --warn: #EBCB8B; --high: #F0B48E; --bad: #EE9A93;
+  color-scheme: dark;
+}
+/* Палитра 3, рекомендация: «Сумерки», приглушённая */
+:root[data-pal="dusk"] {
+  --n0: #1C2127; --n1: #252B32; --n2: #3E4954;
+  --accent: #C8B898; --on-accent: #1C2127; --accent2: #9DB1A5;
+  --text: #D6D1C7; --well: #181C21; --page: #15191E;
+  --glass: color-mix(in srgb, var(--n2) 32%, transparent);
+  --muted: color-mix(in srgb, var(--text) 62%, transparent);
+  --ok: #9CC3A8; --warn: #D4B57E; --high: #D39E82; --bad: #CF8F88;
+  color-scheme: dark;
+}
+/* Палитра 2, светлый вариант */
+:root[data-pal="linen"] {
+  --n0: #EAE0CF; --n1: #F4EEE4; --n2: #94B4C1;
+  --accent: #213448; --on-accent: #F4EEE4; --accent2: #547792;
+  --text: #213448; --well: #FFFFFF; --page: #DDD2BE;
+  --glass: color-mix(in srgb, #FFFFFF 46%, transparent);
+  --glass-hi: color-mix(in srgb, #FFFFFF 70%, transparent);
+  --muted: color-mix(in srgb, var(--text) 68%, transparent);
+  --faint: color-mix(in srgb, var(--text) 50%, transparent);
+  --ok: #2C7A57; --warn: #976312; --high: #AE5A26; --bad: #B2433A;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--text); font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+.page { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+h1, h2 { font-family: var(--font-display); font-weight: 600; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(24px, 3.6vw, 34px); letter-spacing: -0.01em; }
+h2 { font-size: 19px; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 70ch; }
+a { color: var(--accent); }
+button { font-family: inherit; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; align-items: flex-end; }
+.head > div:first-child { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.picker { display: flex; flex-direction: column; gap: 8px; }
+.picker .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); }
+.picker .opts2 { display: flex; flex-wrap: wrap; gap: 8px; }
+.picker button { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; border-radius: 8px; border: 1px solid var(--glass-line); background: transparent; color: var(--text); font-size: 13px; cursor: pointer; }
+.picker button[aria-pressed="true"] { border-color: var(--accent2); box-shadow: inset 0 0 0 1px var(--accent2); }
+.picker .chipset { display: flex; border-radius: 5px; overflow: hidden; }
+.picker .chipset i { width: 16px; height: 26px; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs button { background: transparent; color: var(--muted); border: 1px solid var(--glass-line); border-radius: 6px; padding: 8px 14px; font-size: 14px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+
+/* ---------- окно программы ---------- */
+.stage { width: 100%; max-width: 100%; aspect-ratio: 1200 / 760; position: relative; }
+.win {
+  position: absolute; left: 0; top: 0; width: 1200px; height: 760px; transform-origin: 0 0;
+  border-radius: 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55); font-size: 14px; display: flex; flex-direction: column;
+  background:
+    radial-gradient(520px 420px at 12% 18%, color-mix(in srgb, var(--n2) 95%, transparent), transparent 70%),
+    radial-gradient(620px 520px at 88% 92%, color-mix(in srgb, var(--n2) 80%, transparent), transparent 70%),
+    radial-gradient(380px 300px at 72% 10%, color-mix(in srgb, var(--accent2) 14%, transparent), transparent 70%),
+    radial-gradient(500px 400px at 40% 80%, var(--n1), transparent 70%),
+    var(--n0);
+}
+.titlebar { height: 38px; display: flex; align-items: center; gap: 10px; padding-left: 14px; flex: none; color: var(--muted); font-size: 12px; }
+.titlebar svg { width: 16px; height: 16px; color: var(--accent); }
+.titlebar .ctl { margin-left: auto; display: flex; height: 100%; }
+.titlebar .ctl span { width: 46px; display: grid; place-items: center; color: var(--muted); }
+.titlebar .ctl svg { width: 10px; height: 10px; color: var(--muted); }
+.body { flex: 1; display: flex; min-height: 0; }
+.screen { flex: 1; display: none; min-height: 0; }
+.screen.on { display: flex; }
+
+.glass {
+  background: var(--glass); border: 1px solid var(--glass-line); border-radius: 10px;
+  backdrop-filter: blur(26px) saturate(140%); -webkit-backdrop-filter: blur(26px) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+.ico { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* навигация FluentWindow */
+.nav { width: 232px; flex: none; padding: 4px 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.nav .item { display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-radius: 6px; color: var(--text); position: relative; }
+.nav .item .n { margin-left: auto; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.nav .item.sel { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.nav .item.sel::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 3px; border-radius: 2px; background: var(--accent2); }
+.nav .label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 14px 12px 6px; }
+.nav .dot { width: 8px; height: 8px; border-radius: 50%; margin: 0 5px; flex: none; }
+.nav .spacer { flex: 1; }
+.nav .sep { height: 1px; background: var(--glass-line); margin: 6px 4px; }
+
+/* хранилище */
+.content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 6px 18px 18px 6px; }
+.topbar { display: flex; align-items: center; gap: 10px; }
+.topbar h3 { margin: 0 auto 0 4px; font: 600 26px/1.2 var(--font-display); }
+.search { display: flex; align-items: center; gap: 8px; width: 300px; height: 34px; padding: 0 10px; border-radius: 6px; background: color-mix(in srgb, var(--well) 45%, transparent); border: 1px solid var(--glass-line); border-bottom: 1px solid color-mix(in srgb, var(--text) 35%, transparent); color: var(--faint); }
+.search kbd { margin-left: auto; font: 11px var(--font-mono); color: var(--faint); border: 1px solid var(--glass-line); border-radius: 4px; padding: 1px 5px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--glass-line); background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); font-size: 14px; white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+.btn.icon { width: 34px; padding: 0; justify-content: center; }
+.chips { display: flex; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 13px; color: var(--muted); }
+.chip b { color: var(--text); font-variant-numeric: tabular-nums; }
+.chip i { width: 7px; height: 7px; border-radius: 50%; }
+.split { flex: 1; display: flex; gap: 14px; min-height: 0; }
+.list { width: 420px; flex: none; padding: 6px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.row { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 7px; }
+.row.sel { background: color-mix(in srgb, var(--text) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent); }
+.fav { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 15px; flex: none; color: #121A2B; }
+.row .t { min-width: 0; flex: 1; }
+.row .t b { display: block; font-weight: 600; }
+.row .t span { display: block; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; letter-spacing: 0.02em; }
+.pill.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.pill.high { color: var(--high); background: color-mix(in srgb, var(--high) 14%, transparent); }
+.pill.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.star { color: var(--accent2); width: 15px; height: 15px; }
+.detail { flex: 1; min-width: 0; padding: 22px 24px; display: flex; flex-direction: column; gap: 16px; }
+.dhead { display: flex; align-items: center; gap: 14px; }
+.dhead .fav { width: 48px; height: 48px; font-size: 22px; border-radius: 11px; }
+.dhead h4 { margin: 0; font: 600 22px/1.2 var(--font-display); }
+.dhead p { color: var(--muted); font-size: 13px; }
+.dhead .acts { margin-left: auto; display: flex; gap: 8px; }
+.field { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; background: color-mix(in srgb, var(--well) 32%, transparent); border: 1px solid var(--glass-line); }
+.field .k { width: 92px; color: var(--muted); font-size: 13px; flex: none; }
+.field .v { flex: 1; min-width: 0; }
+.field .v.mono { font-family: var(--font-mono); letter-spacing: 0.08em; }
+.field .tool { color: var(--muted); display: flex; gap: 14px; }
+.meter { display: flex; gap: 4px; margin-top: 6px; }
+.meter i { flex: 1; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text) 12%, transparent); }
+.meter i.on { background: var(--ok); }
+.meta { display: flex; gap: 22px; color: var(--faint); font-size: 12px; margin-top: auto; }
+
+/* вход */
+.login { flex: 1; display: grid; place-items: center; }
+.lcard { width: 400px; padding: 34px 34px 28px; display: flex; flex-direction: column; gap: 14px; }
+.lcard .logo { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); margin-bottom: 4px; }
+.lcard .logo svg { width: 28px; height: 28px; stroke-width: 1.8; }
+.lcard h3 { margin: 0; font: 600 26px/1.2 var(--font-display); }
+.lcard .sub { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; margin-top: -8px; }
+.input { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 6px; background: color-mix(in srgb, var(--well) 50%, transparent); border: 1px solid var(--glass-line); border-bottom: 2px solid var(--accent); }
+.input .v { flex: 1; font-family: var(--font-mono); letter-spacing: 0.25em; }
+.input svg { color: var(--muted); }
+.lcard .btn { height: 40px; justify-content: center; }
+.lcard .links { display: flex; justify-content: space-between; font-size: 13px; color: var(--accent2); }
+.note { display: flex; gap: 10px; font-size: 12px; color: var(--muted); padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--well) 35%, transparent); border: 1px solid var(--glass-line); }
+.note svg { color: var(--warn); width: 16px; height: 16px; }
+
+/* генератор */
+.gen { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 6px 18px 18px 6px; min-width: 0; }
+.gen .grid2 { display: grid; grid-template-columns: 1fr 380px; gap: 14px; flex: 1; min-height: 0; }
+.out { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.seg { display: inline-flex; padding: 3px; border-radius: 8px; background: color-mix(in srgb, var(--well) 45%, transparent); border: 1px solid var(--glass-line); align-self: flex-start; }
+.seg span { padding: 6px 16px; border-radius: 6px; color: var(--muted); font-size: 13px; }
+.seg span.on { background: var(--n2); color: var(--text); box-shadow: inset 0 1px 0 var(--glass-hi); }
+.pw { font: 500 30px/1.35 var(--font-mono); letter-spacing: 0.03em; word-break: break-all; padding: 22px 22px; border-radius: 10px; background: color-mix(in srgb, var(--well) 45%, transparent); border: 1px solid var(--glass-line); }
+.pw .d { color: var(--warn); } .pw .s { color: var(--ok); }
+.strength { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+.strength .bar { flex: 1; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text) 10%, transparent); overflow: hidden; }
+.strength .bar i { display: block; height: 100%; width: 92%; background: var(--ok); border-radius: 3px; }
+.strength b { color: var(--ok); }
+.opts { padding: 20px 22px; display: flex; flex-direction: column; gap: 4px; }
+.opts h5 { margin: 0 0 8px; font: 600 15px var(--font-display); }
+.slider { display: flex; align-items: center; gap: 14px; padding: 6px 0 14px; }
+.slider .track { flex: 1; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text) 16%, transparent); position: relative; }
+.slider .track i { position: absolute; left: 0; top: 0; bottom: 0; width: 38%; background: var(--accent); border-radius: 2px; }
+.slider .track b { position: absolute; left: 38%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; background: var(--n1); border: 5px solid var(--accent); }
+.slider .num { width: 46px; text-align: center; font-variant-numeric: tabular-nums; padding: 4px 0; border-radius: 6px; background: color-mix(in srgb, var(--well) 45%, transparent); border: 1px solid var(--glass-line); }
+.toggle { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-top: 1px solid var(--glass-line); font-size: 14px; }
+.toggle small { display: block; color: var(--faint); font-family: var(--font-mono); font-size: 12px; }
+.sw2 { width: 40px; height: 20px; border-radius: 10px; border: 1px solid var(--muted); position: relative; flex: none; }
+.sw2::after { content: ""; position: absolute; top: 3px; left: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+.sw2.on { background: var(--accent); border-color: var(--accent); }
+.sw2.on::after { left: 23px; background: var(--on-accent); }
+.hist { padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; }
+.hist div { display: flex; justify-content: space-between; font: 13px var(--font-mono); color: var(--muted); }
+
+/* проверка утечек */
+.sec { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 6px 18px 18px 6px; min-width: 0; }
+.score { display: grid; grid-template-columns: 260px repeat(4, 1fr); gap: 14px; }
+.ring { padding: 18px; display: flex; align-items: center; gap: 16px; }
+.ring svg { width: 84px; height: 84px; }
+.ring b { font: 600 28px var(--font-display); display: block; }
+.ring span { color: var(--muted); font-size: 13px; }
+.stat { padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; }
+.stat b { font: 600 30px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+.stat.c b { color: var(--bad); } .stat.h b { color: var(--high); } .stat.m b { color: var(--warn); } .stat.s b { color: var(--ok); }
+.issues { flex: 1; padding: 6px; display: flex; flex-direction: column; min-height: 0; }
+.issues .row { padding: 11px 12px; border-bottom: 1px solid var(--glass-line); border-radius: 0; }
+.issues .row:last-child { border-bottom: 0; }
+.issues .why { width: 330px; color: var(--muted); font-size: 13px; }
+.issues .btn { height: 30px; font-size: 13px; }
+
+/* ---------- под окном ---------- */
+.plan { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.plan section { background: var(--n1); border: 1px solid var(--glass-line); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.plan ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--text); }
+.plan li span { color: var(--muted); }
+code, pre { font-family: var(--font-mono); font-size: 13px; }
+pre { margin: 0; background: var(--well); border: 1px solid var(--glass-line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; color: var(--text); line-height: 1.55; }
+.foot { font-size: 13px; color: var(--faint); max-width: 90ch; }
+@media (max-width: 760px) { .plan { grid-template-columns: 1fr; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><path d="M12 14.5v2.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2 2M14 9l2 2"/></symbol>
+  <symbol id="i-all" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.8l2.5 5.2 5.6.7-4.1 3.9 1 5.6L12 16.5l-5 2.7 1-5.6-4.1-3.9 5.6-.7z"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.1"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></symbol>
+  <symbol id="i-dice" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r=".6"/><circle cx="15" cy="15" r=".6"/><circle cx="15" cy="9" r=".6"/><circle cx="9" cy="15" r=".6"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 4h4M6.5 7l1 13h9l1-13"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 8a7.5 7.5 0 1 0 .5 6"/><path d="M19.5 4v4.5H15"/></symbol>
+  <symbol id="i-min" viewBox="0 0 10 10"><path d="M0 5h10"/></symbol>
+  <symbol id="i-max" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="head">
+    <div>
+      <h1>Менеджер паролей в стиле Fluent Glass</h1>
+      <p class="lede">Макет четырёх экранов твоей программы: Fluent-окно с боковой навигацией, стеклянные панели и палитры на выбор: две твои с Color Hunt и моя приглушённая «Сумерки». В программе они будут выбираться в настройках. Записи в хранилище придуманы для примера. Надписи оставлены на английском, как в программе сейчас.</p>
+    </div>
+    <div class="picker">
+      <span class="lbl">Палитра</span>
+      <div class="opts2">
+        <button type="button" id="p-midnight" data-p="midnight" aria-pressed="true"><span class="chipset"><i style="background:#010736"></i><i style="background:#0D1C42"></i><i style="background:#22396F"></i><i style="background:#FCF1D0"></i></span>1 · тёмно-синяя</button>
+        <button type="button" id="p-slate" data-p="slate" aria-pressed="false"><span class="chipset"><i style="background:#213448"></i><i style="background:#547792"></i><i style="background:#94B4C1"></i><i style="background:#EAE0CF"></i></span>2 · тёмная</button>
+        <button type="button" id="p-dusk" data-p="dusk" aria-pressed="false"><span class="chipset"><i style="background:#1C2127"></i><i style="background:#3E4954"></i><i style="background:#9DB1A5"></i><i style="background:#C8B898"></i></span>3 · моя: «Сумерки»</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Экран">
+    <button type="button" role="tab" id="t-vault" aria-selected="true" data-s="vault">Хранилище</button>
+    <button type="button" role="tab" id="t-login" aria-selected="false" data-s="login">Вход</button>
+    <button type="button" role="tab" id="t-gen" aria-selected="false" data-s="gen">Генератор</button>
+    <button type="button" role="tab" id="t-sec" aria-selected="false" data-s="sec">Проверка утечек</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="win" id="win">
+      <div class="titlebar"><svg class="ico"><use href="#i-lock"/></svg>Password Manager
+        <div class="ctl"><span><svg class="ico"><use href="#i-min"/></svg></span><span><svg class="ico"><use href="#i-max"/></svg></span><span><svg class="ico"><use href="#i-x"/></svg></span></div>
+      </div>
+      <div class="body">
+
+        <!-- Навигация общая для экранов внутри хранилища -->
+        <nav class="nav" id="nav">
+          <div class="item" data-n="vault"><svg class="ico"><use href="#i-all"/></svg>All passwords<span class="n">42</span></div>
+          <div class="item"><svg class="ico"><use href="#i-star"/></svg>Favorites<span class="n">6</span></div>
+          <div class="item"><svg class="ico"><use href="#i-warn"/></svg>Weak passwords<span class="n">4</span></div>
+          <div class="item"><svg class="ico"><use href="#i-clock"/></svg>Recently used</div>
+          <div class="label">Categories</div>
+          <div class="item"><i class="dot" style="background:#7FA8F5"></i>Social Media<span class="n">9</span></div>
+          <div class="item"><i class="dot" style="background:#F29A93"></i>Banking<span class="n">5</span></div>
+          <div class="item"><i class="dot" style="background:#8FD9B6"></i>Email<span class="n">4</span></div>
+          <div class="item"><i class="dot" style="background:#F3C77A"></i>Shopping<span class="n">8</span></div>
+          <div class="item"><i class="dot" style="background:#C4A8F0"></i>Work<span class="n">11</span></div>
+          <div class="item"><i class="dot" style="background:#7FD6D0"></i>Entertainment<span class="n">5</span></div>
+          <div class="spacer"></div>
+          <div class="sep"></div>
+          <div class="item" data-n="gen"><svg class="ico"><use href="#i-dice"/></svg>Generator</div>
+          <div class="item" data-n="sec"><svg class="ico"><use href="#i-shield"/></svg>Security check<span class="n" style="color:var(--bad)">3</span></div>
+          <div class="item"><svg class="ico"><use href="#i-gear"/></svg>Settings</div>
+          <div class="item"><svg class="ico"><use href="#i-lock"/></svg>Lock vault</div>
+        </nav>
+
+        <!-- Хранилище -->
+        <div class="screen on" data-s="vault">
+          <div class="content">
+            <div class="topbar">
+              <h3>All passwords</h3>
+              <div class="search"><svg class="ico"><use href="#i-search"/></svg>Search passwords<kbd>Ctrl+F</kbd></div>
+              <span class="btn primary"><svg class="ico"><use href="#i-plus"/></svg>New password</span>
+            </div>
+            <div class="chips">
+              <span class="chip glass"><b>42</b> total</span>
+              <span class="chip glass"><i style="background:var(--ok)"></i><b>31</b> strong</span>
+              <span class="chip glass"><i style="background:var(--warn)"></i><b>7</b> medium</span>
+              <span class="chip glass"><i style="background:var(--bad)"></i><b>4</b> weak</span>
+            </div>
+            <div class="split">
+              <div class="list glass">
+                <div class="row sel"><span class="fav" style="background:#E8E4DA">G</span><div class="t"><b>GitHub</b><span>alex.dev@example.com</span></div><svg class="ico star"><use href="#i-star"/></svg><span class="pill ok">Strong</span></div>
+                <div class="row"><span class="fav" style="background:#F2B8B2">G</span><div class="t"><b>Gmail</b><span>alex@example.com</span></div><svg class="ico star"><use href="#i-star"/></svg><span class="pill ok">Strong</span></div>
+                <div class="row"><span class="fav" style="background:#9DB8F2">P</span><div class="t"><b>PayPal</b><span>alex@example.com</span></div><span class="pill ok">Strong</span></div>
+                <div class="row"><span class="fav" style="background:#A7B6CF">S</span><div class="t"><b>Steam</b><span>alex_gamer</span></div><span class="pill warn">Medium</span></div>
+                <div class="row"><span class="fav" style="background:#F6D49A">A</span><div class="t"><b>Amazon</b><span>alex@example.com</span></div><span class="pill ok">Strong</span></div>
+                <div class="row"><span class="fav" style="background:#F29A93">N</span><div class="t"><b>Netflix</b><span>family@example.com</span></div><span class="pill bad">Weak</span></div>
+                <div class="row"><span class="fav" style="background:#8FB4E8">L</span><div class="t"><b>LinkedIn</b><span>alex.chernysh@example.com</span></div><span class="pill ok">Strong</span></div>
+                <div class="row"><span class="fav" style="background:#9FD8C4">M</span><div class="t"><b>Monzo</b><span>alex@example.com</span></div><svg class="ico star"><use href="#i-star"/></svg><span class="pill ok">Strong</span></div>
+                <div class="row"><span class="fav" style="background:#C9B3F2">D</span><div class="t"><b>Discord</b><span>alex#2041</span></div><span class="pill warn">Medium</span></div>
+              </div>
+              <div class="detail glass">
+                <div class="dhead">
+                  <span class="fav" style="background:#E8E4DA">G</span>
+                  <div><h4>GitHub</h4><p>Work · in favorites</p></div>
+                  <div class="acts"><span class="btn"><svg class="ico"><use href="#i-edit"/></svg>Edit</span><span class="btn icon"><svg class="ico"><use href="#i-trash"/></svg></span></div>
+                </div>
+                <div class="field"><span class="k">Username</span><span class="v">alex.dev@example.com</span><span class="tool"><svg class="ico"><use href="#i-copy"/></svg></span></div>
+                <div class="field"><span class="k">Password</span><span class="v mono">••••••••••••••••••</span><span class="tool"><svg class="ico"><use href="#i-eye"/></svg><svg class="ico"><use href="#i-copy"/></svg></span></div>
+                <div class="field"><span class="k">Website</span><span class="v">https://github.com</span><span class="tool"><svg class="ico"><use href="#i-link"/></svg><svg class="ico"><use href="#i-copy"/></svg></span></div>
+                <div class="field" style="align-items:flex-start"><span class="k">Strength</span><span class="v">Strong · 18 characters, 4 character types<div class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div></span></div>
+                <div class="field" style="align-items:flex-start"><span class="k">Notes</span><span class="v" style="color:var(--muted)">2FA through the authenticator app. Recovery codes are in the safe.</span></div>
+                <div class="meta"><span>Created 3 Mar 2026</span><span>Modified 12 Sep 2026</span><span>Last used today, 09:41</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Вход -->
+        <div class="screen" data-s="login">
+          <div class="login">
+            <div class="lcard glass">
+              <div class="logo"><svg class="ico"><use href="#i-lock"/></svg></div>
+              <h3>Unlock your vault</h3>
+              <p class="sub">Secure · Local · Private</p>
+              <div class="input"><span class="v">••••••••••••</span><svg class="ico"><use href="#i-eye"/></svg></div>
+              <span class="btn primary">Unlock</span>
+              <div class="links"><span>Create a new vault</span><span>Generate a strong password</span></div>
+              <div class="note"><svg class="ico"><use href="#i-warn"/></svg><span>The master password cannot be recovered. If you forget it, the vault stays locked for good.</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Генератор -->
+        <div class="screen" data-s="gen">
+          <div class="gen">
+            <div class="topbar"><h3>Password generator</h3></div>
+            <div class="grid2">
+              <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+                <div class="out glass">
+                  <div class="seg"><span class="on">Password</span><span>Passphrase</span></div>
+                  <div class="pw">vK7<span class="s">#</span>qT2m<span class="s">!</span>Lx9pR<span class="s">$</span>w4Zb</div>
+                  <div class="strength"><span>Strength</span><div class="bar"><i></i></div><b>Very strong</b></div>
+                  <div style="display:flex;gap:8px"><span class="btn primary"><svg class="ico"><use href="#i-copy"/></svg>Copy</span><span class="btn"><svg class="ico"><use href="#i-refresh"/></svg>Regenerate</span><span class="btn"><svg class="ico"><use href="#i-plus"/></svg>Save as new entry</span></div>
+                </div>
+                <div class="hist glass">
+                  <div><span style="color:var(--faint);font-family:var(--font-ui)">Recent this session</span><span></span></div>
+                  <div><span>Hq8!wPz3@rT6nB2m</span><span>16</span></div>
+                  <div><span>orbit-maple-candle-river</span><span>4 words</span></div>
+                </div>
+              </div>
+              <div class="opts glass">
+                <h5>Options</h5>
+                <div class="slider"><span style="color:var(--muted)">Length</span><div class="track"><i></i><b></b></div><span class="num">18</span></div>
+                <div class="toggle"><span>Uppercase<small>A–Z</small></span><span class="sw2 on"></span></div>
+                <div class="toggle"><span>Lowercase<small>a–z</small></span><span class="sw2 on"></span></div>
+                <div class="toggle"><span>Numbers<small>0–9</small></span><span class="sw2 on"></span></div>
+                <div class="toggle"><span>Symbols<small>! @ # $ % ^ &amp; *</small></span><span class="sw2 on"></span></div>
+                <div class="toggle"><span>Exclude ambiguous<small>0 O l 1 I</small></span><span class="sw2"></span></div>
+                <div class="toggle"><span>Exclude similar<small>i l 1 L o 0 O</small></span><span class="sw2"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Проверка утечек -->
+        <div class="screen" data-s="sec">
+          <div class="sec">
+            <div class="topbar"><h3>Security check</h3><span style="color:var(--faint);font-size:13px">Last check: today, 10:52</span><span class="btn primary"><svg class="ico"><use href="#i-refresh"/></svg>Check now</span></div>
+            <div class="score">
+              <div class="ring glass">
+                <svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" style="stroke:var(--glass-line)" stroke-width="8"/><circle cx="42" cy="42" r="34" fill="none" style="stroke:var(--accent2)" stroke-width="8" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="34" transform="rotate(-90 42 42)"/></svg>
+                <div><b>84</b><span>Vault health score out of 100</span></div>
+              </div>
+              <div class="stat glass c"><b>1</b><span>Critical: found in breaches</span></div>
+              <div class="stat glass h"><b>2</b><span>High: reused</span></div>
+              <div class="stat glass m"><b>4</b><span>Medium: weak</span></div>
+              <div class="stat glass s"><b>35</b><span>Safe</span></div>
+            </div>
+            <div class="issues glass">
+              <div class="row"><span class="fav" style="background:#F29A93">N</span><div class="t"><b>Netflix</b><span>family@example.com</span></div><span class="why">Seen in 3 known breaches. Change it now.</span><span class="pill bad">Critical</span><span class="btn">Change</span></div>
+              <div class="row"><span class="fav" style="background:#A7B6CF">S</span><div class="t"><b>Steam</b><span>alex_gamer</span></div><span class="why">Same password as Discord.</span><span class="pill high">High</span><span class="btn">Change</span></div>
+              <div class="row"><span class="fav" style="background:#C9B3F2">D</span><div class="t"><b>Discord</b><span>alex#2041</span></div><span class="why">Same password as Steam.</span><span class="pill high">High</span><span class="btn">Change</span></div>
+              <div class="row"><span class="fav" style="background:#F6D49A">E</span><div class="t"><b>eBay</b><span>alex@example.com</span></div><span class="why">9 characters, letters only.</span><span class="pill warn">Medium</span><span class="btn">Change</span></div>
+              <div class="row"><span class="fav" style="background:#9DB8F2">T</span><div class="t"><b>Twitter / X</b><span>@alex_ch</span></div><span class="why">Not changed for over 2 years.</span><span class="pill warn">Medium</span><span class="btn">Change</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="plan">
+    <section>
+      <h2>Что меняется по сравнению с сейчас</h2>
+      <ul>
+        <li>Меню File/Edit/View и панель инструментов уходят в левую навигацию. <span>Всё, что было в меню, остаётся доступно.</span></li>
+        <li>Таблица из шести колонок превращается в список и карточку записи справа. <span>Копирование и «показать» стоят у каждого поля.</span></li>
+        <li>Пять больших цветных плашек статистики становятся строкой маленьких счётчиков.</li>
+        <li>Эмодзи на кнопках заменяются иконками Fluent. <span>На Windows эмодзи рисуются по-разному и создают тот самый разнобой.</span></li>
+        <li>Генератор и проверка утечек становятся страницами окна, а не отдельными диалогами.</li>
+        <li>Двадцать с лишним разных setStyleSheet заменяет одна тема на всё приложение.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Как это делается на PyQt5</h2>
+      <ul>
+        <li><code>FluentWindow</code> с навигацией и тёмной темой, акцент кремовый.</li>
+        <li>Стекло окна: эффект Mica в Windows 11 (полупрозрачность с оттенком обоев). <span>В Windows 10 вместо него будет обычный тёмный фон.</span></li>
+        <li>Стекло панелей: полупрозрачные карточки поверх размытого градиента в фоне окна. <span>Настоящего размытия соседних виджетов, как в браузере, в Qt нет; на неподвижном фоне это выглядит так же.</span></li>
+        <li>Меню и всплывающие подсказки получают эффект Acrylic. <span>Это настоящее размытие, оно уже есть в библиотеке.</span></li>
+      </ul>
+<pre>from qfluentwidgets import FluentWindow, setTheme, setThemeColor, Theme
+setTheme(Theme.DARK)
+setThemeColor("#FCF1D0")
+window.setMicaEffectEnabled(True)</pre>
+    </section>
+  </div>
+
+  <p class="foot">Шрифт в макете системный. На Windows это Segoe UI, тот же, что будет в программе. Цвета силы пароля (зелёный, жёлтый, красный) подобраны в тон палитре, их можно поменять.</p>
+</div>
+
+<script>
+(function () {
+  var stage = document.getElementById('stage'), win = document.getElementById('win');
+  function fit() { win.style.transform = 'scale(' + (stage.clientWidth / 1200) + ')'; }
+  fit();
+  window.addEventListener('resize', fit);
+
+  var tabs = document.querySelectorAll('.tabs button');
+  var screens = document.querySelectorAll('.screen');
+  var nav = document.getElementById('nav');
+  var navItems = nav.querySelectorAll('.item[data-n]');
+  function show(s) {
+    tabs.forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-s') === s)); });
+    screens.forEach(function (el) { el.classList.toggle('on', el.getAttribute('data-s') === s); });
+    nav.hidden = s === 'login';
+    navItems.forEach(function (el) { el.classList.toggle('sel', el.getAttribute('data-n') === s); });
+    try { history.replaceState(null, '', '#' + s); } catch (e) {}
+  }
+  tabs.forEach(function (b) { b.addEventListener('click', function () { show(b.getAttribute('data-s')); }); });
+  navItems.forEach(function (el) { el.style.cursor = 'pointer'; el.addEventListener('click', function () { show(el.getAttribute('data-n')); }); });
+  var pick = document.querySelectorAll('.picker button');
+  pick.forEach(function (b) { b.addEventListener('click', function () {
+    var p = b.getAttribute('data-p');
+    if (p === 'midnight') document.documentElement.removeAttribute('data-pal'); else document.documentElement.setAttribute('data-pal', p);
+    pick.forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+  }); });
+  var h = (location.hash || '').slice(1);
+  show(['vault', 'login', 'gen', 'sec'].indexOf(h) >= 0 ? h : 'vault');
+})();
+</script>

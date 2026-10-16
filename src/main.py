@@ -17,6 +17,7 @@ from managers.password_manager import PasswordManager
 from security.generator import PasswordGenerator
 from ui.login_widget import LoginWidget
 from ui.clipboard import clear_secret_now
+from ui import theme
 
 # Lock the vault after this many minutes without mouse or keyboard activity
 AUTO_LOCK_MINUTES = 5
@@ -68,7 +69,12 @@ class ActivityMonitor(QObject):
 
 class PasswordManagerApp:
 
+    auto_lock_minutes = AUTO_LOCK_MINUTES
+
     def __init__(self):
+        # Colour theme saved in the settings file (applies to every window)
+        theme.init_theme()
+
         self.db_path = get_db_path()
 
         # Connect to database before the managers use it
@@ -202,7 +208,7 @@ def main():
 
     app.setApplicationName("Password Manager")
     app.setOrganizationName("SecureVault")
-    app.setApplicationVersion("1.2.0")
+    app.setApplicationVersion("1.3.0")
     app.setStyle('Fusion')
 
     try:
