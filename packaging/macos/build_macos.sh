@@ -7,7 +7,7 @@
 #          ./packaging/macos/build_macos.sh
 #   3. The result:
 #          dist/Password Manager.app
-#          dist/PasswordManager-<version>-macOS-<arm64|x86_64>.dmg
+#          dist/PasswordManager-<version>-macOS-<AppleSilicon|Intel>.dmg
 #
 # The script makes a virtual environment in .venv-macos, installs the
 # requirements and PyInstaller, runs the tests, builds the bundle, signs it
@@ -49,6 +49,8 @@ cd "$ROOT"
 APP_NAME="Password Manager"
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/version.py)"
 ARCH="$(uname -m)"
+# File names say which Mac they are for in words people know
+if [[ "$ARCH" == "arm64" ]]; then MAC_KIND="AppleSilicon"; else MAC_KIND="Intel"; fi
 
 if [[ $SKIP_INSTALL -eq 0 ]]; then
     PYTHON="${PYTHON:-python3.12}"
@@ -86,7 +88,7 @@ fi
 codesign --verify --deep --strict "$APP"
 
 # .dmg with the app and a link to /Applications, so it can be dragged across
-DMG="dist/PasswordManager-$VERSION-macOS-$ARCH.dmg"
+DMG="dist/PasswordManager-$VERSION-macOS-$MAC_KIND.dmg"
 STAGING="$(mktemp -d)"
 cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
