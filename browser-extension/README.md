@@ -35,6 +35,8 @@
 
 ## Safari (нужен Mac с Xcode)
 
+Пошаговая инструкция для того, кто настраивает Mac: [docs/safari-install.md](../docs/safari-install.md).
+
 1. На Mac: `sh browser-extension/safari/build_safari.sh`. Скрипт создаст Xcode-проект в `safari/build/`, подставит наш обработчик и настроит App Group `$(TeamIdentifierPrefix)securevault.bridge`.
 2. Откройте проект в Xcode, в Signing & Capabilities у обеих целей выберите свой Apple ID (подойдёт бесплатный), нажмите Run.
 3. Safari → Настройки → Расширения → включите SecureVault и разрешите его на всех сайтах. Для сборки без подписи в меню «Разработка» есть «Разрешить неподписанные расширения», но этот флажок сбрасывается после перезапуска Safari.
