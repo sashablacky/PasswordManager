@@ -20,6 +20,7 @@ from security.generator import PasswordGenerator
 from ui.login_widget import LoginWidget
 from ui.clipboard import clear_secret_now
 from ui import theme
+import app_settings
 
 # Lock the vault after this many minutes without mouse or keyboard activity
 AUTO_LOCK_MINUTES = 5
@@ -100,6 +101,11 @@ class PasswordManagerApp:
         self.auto_lock_timer = None
         self.setup_auto_lock()
 
+        # Lets the browser extension fill in and save passwords (see integration/)
+        self.bridge = None
+        if app_settings.load_settings().get("browser_integration"):
+            self.start_bridge()
+
         print("Password Manager initialized")
         print(f"Database: {self.db_path}")
 
@@ -130,6 +136,8 @@ class PasswordManagerApp:
                 widget.reject()
 
         self.auth_manager.logout()
+        if self.bridge:
+            self.bridge.service.clear_sessions()
 
         # A password copied a moment ago must not stay readable on the clipboard
         clear_secret_now()
@@ -143,6 +151,30 @@ class PasswordManagerApp:
 
     def start(self):
         self.show_login()
+
+    def start_bridge(self):
+        if self.bridge:
+            return
+        try:
+            from integration.server import create_bridge
+            self.bridge = create_bridge(self)
+            self.bridge.start()
+        except Exception as e:
+            # The program works without the browser extension
+            logging.error(f"Browser bridge could not start: {e}")
+            self.bridge = None
+
+    def stop_bridge(self):
+        if self.bridge:
+            self.bridge.stop()
+            self.bridge = None
+
+    def set_browser_integration(self, enabled: bool):
+        app_settings.save_settings(browser_integration=bool(enabled))
+        if enabled:
+            self.start_bridge()
+        else:
+            self.stop_bridge()
 
     def show_login(self):
         if self.login_widget:
@@ -194,6 +226,7 @@ class PasswordManagerApp:
     def shutdown(self):
         if self.auto_lock_timer:
             self.auto_lock_timer.stop()
+        self.stop_bridge()
 
         if self.db and self.db.connection:
             self.auth_manager.logout()

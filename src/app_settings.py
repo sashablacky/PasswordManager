@@ -1,5 +1,5 @@
 """
-Small user preferences that are not secret (currently only the colour theme).
+Small user preferences that are not secret (colour theme, browser extension on/off).
 
 They live in a JSON file in the per-user data folder, next to the vault but
 not inside it, so the theme can be applied before the vault is unlocked.
@@ -20,6 +20,8 @@ SETTINGS_PATH_ENV = "PASSWORD_MANAGER_SETTINGS"
 
 DEFAULTS = {
     "theme": "dusk",
+    # Accept connections from the browser extension (integration/)
+    "browser_integration": True,
 }
 
 

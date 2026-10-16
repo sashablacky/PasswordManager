@@ -1,13 +1,13 @@
 """
 Settings page: colour theme, vault operations that used to be in the menu bar
-(master password, export/import, backup/restore), tools and "About".
+(master password, export/import, backup/restore), browser extension, tools and "About".
 """
 
 from PyQt5.QtCore import Qt, QRectF, QSize, pyqtSignal
 from PyQt5.QtGui import QFont, QPainter, QPen, QColor
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QAbstractButton, QButtonGroup, QFrame)
 
-from qfluentwidgets import SettingCardGroup, PushSettingCard, FluentIcon, ScrollArea
+from qfluentwidgets import SettingCardGroup, PushSettingCard, SwitchSettingCard, FluentIcon, ScrollArea
 from ui import theme
 from ui.clipboard import CLIPBOARD_CLEAR_SECONDS
 from ui.icons import AppIcon
@@ -167,6 +167,21 @@ class SettingsPage(ScrollArea):
             self.vault_cards[title] = card
         layout.addWidget(vault)
 
+        # Browser extension
+        browser = SettingCardGroup("Browser extension", content)
+        self.browser_switch = SwitchSettingCard(
+            FluentIcon.GLOBE, "Allow browser extension",
+            "Firefox and Safari can fill in and save passwords once you allow them here"
+        )
+        self.browser_switch.setChecked(window.app.bridge is not None)
+        self.browser_switch.checkedChanged.connect(window.set_browser_integration)
+        browser.addSettingCard(self.browser_switch)
+        self.browsers_card = PushSettingCard("Disconnect all", FluentIcon.LINK, "Connected browsers", "")
+        self.browsers_card.clicked.connect(window.forget_browsers)
+        browser.addSettingCard(self.browsers_card)
+        layout.addWidget(browser)
+        self.update_browser_status()
+
         # Tools
         tools = SettingCardGroup("Tools", content)
         health = PushSettingCard("Open report", FluentIcon.PIE_SINGLE, "Password health check",
@@ -187,3 +202,17 @@ class SettingsPage(ScrollArea):
         layout.addWidget(about)
 
         layout.addStretch(1)
+
+    def update_browser_status(self):
+        count = len(self.window_.paired_browsers())
+        if count:
+            self.browsers_card.setContent(f"{count} connected. Disconnect them if a computer or browser "
+                                          f"is no longer yours; they can connect again with your approval.")
+        else:
+            self.browsers_card.setContent("No browser is connected yet. Click \"Connect\" in the extension "
+                                          "and allow it here.")
+        self.browsers_card.button.setEnabled(bool(count))
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.update_browser_status()

@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 from database.db_manager import DatabaseManager
-from security.encryption import EncryptionEngine, BREACH_RESULT_FIELD, record_aad, wipe
+from security.encryption import (EncryptionEngine, DecryptionError, BREACH_RESULT_FIELD, browser_client_aad,
+                                 record_aad, wipe)
 from security.kdf import KeyDerivationFunction, VAULT_FORMAT_CURRENT, VAULT_FORMAT_LEGACY
 
 logger = logging.getLogger(__name__)
@@ -323,6 +324,10 @@ class AuthenticationManager:
                 "WHERE user_id = ? AND encrypted_result IS NOT NULL",
                 (user_id,)
             )
+            # Pairing keys of browser extensions (the table exists once a browser was paired)
+            browser_rows = self.db.fetch_all(
+                "SELECT client_id, encrypted_key FROM browser_clients WHERE user_id = ?", (user_id,)
+            ) if self.db.table_exists("browser_clients") else []
 
             self.db.begin_transaction()
             try:
@@ -340,6 +345,20 @@ class AuthenticationManager:
                         "UPDATE breach_checks SET encrypted_result = ? WHERE check_id = ?",
                         (reencrypt(row['encrypted_result'], row['password_id'], BREACH_RESULT_FIELD),
                          row['check_id'])
+                    )
+
+                for row in browser_rows:
+                    aad = browser_client_aad(row['client_id'])
+                    try:
+                        new_key_value = new_engine.encrypt(old_engine.decrypt(row['encrypted_key'], aad), aad)
+                    except DecryptionError:
+                        # A damaged pairing must not block the change; that browser just pairs again
+                        self.db.execute_query("DELETE FROM browser_clients WHERE client_id = ?",
+                                              (row['client_id'],))
+                        continue
+                    self.db.execute_query(
+                        "UPDATE browser_clients SET encrypted_key = ? WHERE client_id = ?",
+                        (new_key_value, row['client_id'])
                     )
 
                 self.db.execute_query(

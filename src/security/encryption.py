@@ -167,3 +167,7 @@ def record_aad(engine: EncryptionEngine, password_id: int, field: str) -> Option
     if not engine.bind_records:
         return None
     return f"securevault/v2/{password_id}/{field}".encode("utf-8")
+
+def browser_client_aad(client_id: str) -> bytes:
+    """Associated data of the stored pairing key of a browser extension"""
+    return f"securevault/browser/{client_id}/key".encode("utf-8")

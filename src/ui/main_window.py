@@ -737,6 +737,36 @@ class MainWindow(FluentWindow):
         else:
             QMessageBox.critical(self, "Error", message)
 
+    def set_browser_integration(self, enabled):
+        self.app.set_browser_integration(enabled)
+        if enabled and self.app.bridge is None:
+            self.settings_page.browser_switch.setChecked(False)
+            QMessageBox.warning(self, "Browser extension",
+                                "The connection for the browser extension could not be started.\n"
+                                "Details were written to the log file.")
+
+    def paired_browsers(self):
+        from integration.store import BrowserClientStore
+        try:
+            return BrowserClientStore(self.app.db, self.app.encryption).list(self.user_id)
+        except Exception:
+            return []
+
+    def forget_browsers(self):
+        reply = QMessageBox.question(
+            self, "Disconnect browsers",
+            "Disconnect all browsers from this vault?\nThey will need your approval to connect again.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        from integration.store import BrowserClientStore
+        BrowserClientStore(self.app.db, self.app.encryption).remove_all(self.user_id)
+        if self.app.bridge:
+            self.app.bridge.service.clear_sessions()
+        self.settings_page.update_browser_status()
+        self.toast("Browsers disconnected")
+
     def show_health_check(self):
         """Show password health check"""
         stats = self.app.password_manager.get_statistics(self.user_id)
@@ -1037,6 +1067,7 @@ class MainWindow(FluentWindow):
             "<li>Export/Import functionality</li>"
             "<li>Auto-lock after inactivity</li>"
             "<li>Three colour themes</li>"
+            "<li>Browser extension for Firefox and Safari</li>"
             "</ul>"
             "<p><b>Security:</b> Your passwords never leave your device.</p>"
             "<p>© 2025 SecureVault</p>"
