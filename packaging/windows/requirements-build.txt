@@ -1,0 +1,2 @@
+# Packaging the Windows app (see PasswordManager.spec); not needed to run the program
+pyinstaller==6.19.0

@@ -32,8 +32,9 @@ venv/
 build/
 dist/
 *.spec
-# ...except the macOS bundle recipe, which is written by hand
+# ...except the build recipes, which are written by hand
 !packaging/macos/PasswordManager.spec
+!packaging/windows/PasswordManager.spec
 
 # Local copies made before big changes
 backups/

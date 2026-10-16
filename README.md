@@ -25,6 +25,30 @@ It holds the encrypted vault `password_vault.db`, `settings.json` (theme) and `e
 On macOS and Linux the folder is owner-only (0700) and the vault, backups and CSV
 exports are created owner-only (0600).
 
+## Windows
+
+Installing on Windows (in Russian): [`docs/windows-install.md`](docs/windows-install.md).
+
+Download from the Releases page (no GitHub account needed):
+https://github.com/sashablacky/PasswordManager/releases/latest —
+`...-Windows-Setup.exe` (installer) or `...-Windows-Portable.zip` (no installation).
+
+- The installer (Inno Setup, `packaging/windows/installer.iss`) installs for the
+  current user only, without administrator rights, into
+  `%LOCALAPPDATA%\Programs\Password Manager`, with a Start menu shortcut and an
+  optional desktop shortcut. Uninstalling removes the program but keeps the vault,
+  settings and log in `%APPDATA%\SecureVault`.
+- The program is not code-signed, so SmartScreen may show "Windows protected your
+  PC": **More info** → **Run anyway**.
+- Built by the same GitHub Actions workflow as the Mac app (job `build-windows`):
+  tests, PyInstaller (`packaging/windows/PasswordManager.spec`, version details in
+  the .exe properties, icon `packaging/windows/SecureVault.ico` from
+  `make_ico.py`), a 20-second start on the runner's desktop with an empty
+  `error.log`, the portable .zip, the installer, and a silent install → start →
+  uninstall check that the vault is kept.
+- Build by hand: `pip install -r requirements.txt -r packaging/windows/requirements-build.txt`,
+  then `pyinstaller --noconfirm --clean packaging/windows/PasswordManager.spec`.
+
 ## macOS
 
 Installing on a Mac without a terminal (in Russian): [`docs/macos-install.md`](docs/macos-install.md).

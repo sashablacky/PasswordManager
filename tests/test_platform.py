@@ -356,15 +356,15 @@ def test_startup_error_is_written_to_the_log(monkeypatch, tmp_path):
     log = tmp_path / "error.log"
     alerts = []
     monkeypatch.setattr(main, "get_log_path", lambda: str(log))
-    monkeypatch.setattr(main, "_mac_alert", lambda title, text: alerts.append(text))
+    monkeypatch.setattr(main, "_system_alert", lambda title, text: alerts.append(text))
     monkeypatch.setattr(sys, "__excepthook__", lambda *a: None)
-    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delattr(sys, "frozen", raising=False)
 
     main.report_startup_error(*_raise_import_error())
 
     text = log.read_text(encoding="utf-8")
     assert "could not start" in text and "built for macOS 15.0" in text and "Traceback" in text
-    assert alerts == []  # the Windows/source run has a console
+    assert alerts == []  # run from the sources: the console shows the error
 
 
 def test_startup_error_shows_an_alert_in_the_packaged_mac_app(monkeypatch, tmp_path):
@@ -426,3 +426,26 @@ def test_safari_scan_errors_do_not_escape(qapp, monkeypatch):
     bridge = server.BridgeServer.__new__(server.BridgeServer)
     bridge._servers = {}
     bridge._listen_safari()  # logs a warning, does not raise
+
+
+def test_startup_error_shows_a_message_box_in_the_packaged_windows_app(monkeypatch, tmp_path):
+    import ctypes
+    import types
+    import main
+
+    log = tmp_path / "error.log"
+    boxes = []
+    user32 = types.SimpleNamespace(MessageBoxW=lambda hwnd, text, title, flags: boxes.append((title, text, flags)))
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(user32=user32), raising=False)
+    monkeypatch.setattr(main, "get_log_path", lambda: str(log))
+    monkeypatch.setattr(sys, "__excepthook__", lambda *a: None)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    main.report_startup_error(*_raise_import_error())
+
+    assert len(boxes) == 1
+    title, text, flags = boxes[0]
+    assert title == "Password Manager could not start"
+    assert "ImportError" in text and str(log) in text
+    assert flags & 0x10  # error icon

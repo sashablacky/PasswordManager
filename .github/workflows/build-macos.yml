@@ -1,12 +1,13 @@
-name: Build macOS app
+name: Build apps
 
-# Builds "Password Manager.app" for Apple Silicon and Intel Macs, packed in a
-# .dmg, and keeps it as a downloadable artifact of the run (Actions tab ->
-# the run -> Artifacts). Runs on every push to main and by hand.
+# Builds the program for macOS ("Password Manager.app" in a .dmg, for Apple
+# Silicon and Intel Macs) and for Windows (an installer and a portable .zip),
+# and keeps them as downloadable artifacts of the run (Actions tab -> the run
+# -> Artifacts). Runs on every push to main and by hand.
 #
-# A pushed version tag (v1.4.1, ...) also publishes a GitHub Release with both
-# .dmg files, downloadable without a GitHub account:
-#     git tag v1.4.1 && git push origin v1.4.1
+# A pushed version tag (v1.5.5, ...) also publishes a GitHub Release with all
+# the files, downloadable without a GitHub account:
+#     git tag v1.5.5 && git push origin v1.5.5
 # The tag must match src/version.py. "What's new" for the release page is read
 # from docs/releases/<tag>.md if that file exists.
 
@@ -148,10 +149,121 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  build-windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            packaging/windows/requirements-build.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r packaging/windows/requirements-build.txt
+
+      - name: Tests (offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -o pipefail
+          if ! python -m pytest -q -rfE --tb=short -p no:cacheprovider tests 2>&1 | tee pytest-windows.log; then
+            python .github/scripts/annotate_failure.py "Windows tests failed" < pytest-windows.log
+            exit 1
+          fi
+
+      - name: Build the program
+        run: |
+          set -o pipefail
+          if ! python -m PyInstaller --noconfirm --clean packaging/windows/PasswordManager.spec 2>&1 | tee build.log; then
+            python .github/scripts/annotate_failure.py "Windows build failed" < build.log
+            exit 1
+          fi
+          echo "VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/version.py)" >> "$GITHUB_ENV"
+
+      # On the runner's real desktop (not offscreen); data in a temporary folder
+      - name: Start the program
+        shell: pwsh
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "appdata-portable"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = (Resolve-Path "dist/Password Manager/Password Manager.exe").Path
+          $psi.UseShellExecute = $false
+          $psi.EnvironmentVariables["APPDATA"] = $data
+          $p = [System.Diagnostics.Process]::Start($psi)
+          Start-Sleep -Seconds 20
+          $p.Refresh()
+          $log = Join-Path $data "SecureVault/error.log"
+          if (Test-Path $log) { Get-Content $log }
+          if ($p.HasExited) { Write-Output "::error title=Windows start::the program exited (code $($p.ExitCode))"; exit 1 }
+          Write-Output "Running, window title: '$($p.MainWindowTitle)'"
+          Stop-Process -Id $p.Id -Force
+          if ((Test-Path $log) -and (Get-Item $log).Length -gt 0) { Write-Output "::error title=Windows start::error.log is not empty"; exit 1 }
+
+      - name: Portable .zip
+        run: |
+          cd dist
+          7z a -tzip "PasswordManager-$VERSION-Windows-Portable.zip" "Password Manager" > /dev/null
+          ls -l *.zip
+
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$((Resolve-Path 'dist/Password Manager').Path)" "/DOutputDir=$((Resolve-Path 'dist').Path)" packaging/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem dist/*.exe
+
+      # Silent install for the current user, start, uninstall: the program goes,
+      # the user's data in %APPDATA%\SecureVault stays
+      - name: Check the installer
+        shell: pwsh
+        run: |
+          $setup = (Resolve-Path "dist/PasswordManager-$env:VERSION-Windows-Setup.exe").Path
+          Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -Wait
+          $dir = Join-Path $env:LOCALAPPDATA "Programs/Password Manager"
+          $exe = Join-Path $dir "Password Manager.exe"
+          if (-not (Test-Path $exe)) { Write-Output "::error title=Installer::$exe was not installed"; exit 1 }
+          $shortcut = Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/Password Manager.lnk"
+          if (-not (Test-Path $shortcut)) { Write-Output "::error title=Installer::no Start menu shortcut"; exit 1 }
+          $p = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) { Write-Output "::error title=Installer::the installed program exited"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+          Start-Sleep -Seconds 2
+          $vault = Join-Path $env:APPDATA "SecureVault/password_vault.db"
+          if (-not (Test-Path $vault)) { Write-Output "::error title=Installer::the program created no vault"; exit 1 }
+          Start-Process (Join-Path $dir "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { Write-Output "::error title=Installer::the uninstaller left the program"; exit 1 }
+          if (-not (Test-Path $vault)) { Write-Output "::error title=Installer::the uninstaller deleted the user's vault"; exit 1 }
+          Write-Output "Installed, started, uninstalled; the vault was kept"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: PasswordManager-Windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -160,7 +272,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: PasswordManager-macOS-*
+          pattern: PasswordManager-*
           path: dist
           merge-multiple: true
 
@@ -177,6 +289,8 @@ jobs:
           ls -l dist
           test -f "dist/PasswordManager-$VERSION-macOS-AppleSilicon.dmg"
           test -f "dist/PasswordManager-$VERSION-macOS-Intel.dmg"
+          test -f "dist/PasswordManager-$VERSION-Windows-Setup.exe"
+          test -f "dist/PasswordManager-$VERSION-Windows-Portable.zip"
 
           {
             if [[ -f "docs/releases/$TAG.md" ]]; then
@@ -186,7 +300,7 @@ jobs:
             sed "s/{VERSION}/$VERSION/g" docs/releases/download-help.md
           } > release-notes.md
 
-          gh release create "$TAG" dist/*.dmg \
+          gh release create "$TAG" dist/*.dmg dist/*.exe dist/*.zip \
             --title "Password Manager $VERSION" \
             --notes-file release-notes.md \
             --verify-tag

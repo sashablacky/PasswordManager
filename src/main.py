@@ -13,23 +13,36 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app_paths import get_log_path
 
 
-def _mac_alert(title: str, message: str) -> None:
-    """A system alert without Qt (the packaged Mac app has no console)"""
+def _system_alert(title: str, message: str) -> None:
+    """An error window without Qt, for the packaged app (it has no console)"""
     try:
-        subprocess.run(
-            ["osascript",
-             "-e", "on run argv",
-             "-e", "display alert (item 1 of argv) message (item 2 of argv) as critical",
-             "-e", "end run",
-             title, message],
-            timeout=600, check=False)
+        if sys.platform == "darwin":
+            # Title and text as arguments, so quotes in the message cannot break the script
+            subprocess.run(
+                ["osascript",
+                 "-e", "on run argv",
+                 "-e", "display alert (item 1 of argv) message (item 2 of argv) as critical",
+                 "-e", "end run",
+                 title, message],
+                timeout=600, check=False)
+        elif sys.platform == "win32":
+            import ctypes
+            mb_iconerror = 0x10
+            ctypes.windll.user32.MessageBoxW(None, message, title, mb_iconerror)
     except Exception:
         pass
 
 
+def _show_startup_alert(exc_type, exc_value, log_path) -> None:
+    """Only in the packaged app: run from the sources, the console shows the error"""
+    if getattr(sys, "frozen", False):
+        _system_alert("Password Manager could not start",
+                      f"{exc_type.__name__}: {exc_value}\n\nDetails were written to:\n{log_path}")
+
+
 def report_startup_error(exc_type, exc_value, exc_tb):
     """Write an error that happened before the Qt window could show it to the
-    log, and in the packaged Mac app also show it in a system alert"""
+    log, and in the packaged app also show it in a system alert"""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_tb)
         return
@@ -43,9 +56,7 @@ def report_startup_error(exc_type, exc_value, exc_tb):
     except Exception:
         pass
     sys.__excepthook__(exc_type, exc_value, exc_tb)
-    if sys.platform == "darwin" and getattr(sys, "frozen", False):
-        _mac_alert("Password Manager could not start",
-                   f"{exc_type.__name__}: {exc_value}\n\nDetails were written to:\n{log_path}")
+    _show_startup_alert(exc_type, exc_value, log_path)
 
 
 _fault_log = None
@@ -109,9 +120,8 @@ def handle_exception(exc_type, exc_value, exc_tb):
             None, "Unexpected Error",
             f"An unexpected error occurred:\n{exc_value}\n\nDetails were written to:\n{get_log_path()}"
         )
-    elif sys.platform == "darwin" and getattr(sys, "frozen", False):
-        _mac_alert("Password Manager could not start",
-                   f"{exc_type.__name__}: {exc_value}\n\nDetails were written to:\n{get_log_path()}")
+    else:
+        _show_startup_alert(exc_type, exc_value, get_log_path())
 
 
 # Activity monitor to track user interaction
