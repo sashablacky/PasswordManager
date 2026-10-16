@@ -2,7 +2,7 @@ import html
 
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidgetItem,
                              QHeaderView, QMessageBox, QToolTip, QWidget, QAbstractItemView)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QRectF
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QRect, QRectF
 from PyQt5.QtGui import QFont, QColor, QPainter, QPen
 
 from qfluentwidgets import (TableWidget, ProgressBar, TextEdit, PushButton, TransparentToolButton,
@@ -595,15 +595,24 @@ class BreachCheckPage(QWidget):
             )
 
             dialog = AddPasswordDialog(self.password_manager, self.user_id, categories, pwd, parent=self)
-            if dialog.exec_() == QDialog.Accepted:
-                self.entries_changed.emit()
-                self.status_note(f"Password for '{pwd.title}' updated. Run the check again to re-test it.")
-
+            if dialog.exec_() != QDialog.Accepted:
+                return
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to change password:\n{str(e)}")
+            return
+
+        # The dialog has saved the new password at this point: nothing below may
+        # report the change as failed
+        self.entries_changed.emit()
+        self.status_note(f"Password for '{pwd.title}' updated. Run the check again to re-test it.")
 
     def status_note(self, text):
-        QToolTip.showText(self.mapToGlobal(self.rect().center()), text, self, msecShowTime=3000)
+        """Short confirmation next to the page; cosmetic, so it never raises"""
+        try:
+            # PyQt5 takes the display time only positionally, after the rect
+            QToolTip.showText(self.mapToGlobal(self.rect().center()), text, self, QRect(), 3000)
+        except Exception as e:
+            logger.warning(f"Could not show the note: {e}")
 
     def shutdown(self):
         """Wait for a running check: destroying a running QThread crashes the app"""

@@ -362,3 +362,109 @@ def test_breach_check_offline_is_flagged(app, monkeypatch, messages, qtbot):
     assert "NOT CHECKED" in dialog.results_table.item(0, 3).text()
     assert any(title == "Check Incomplete" for _, title, _ in messages)
     dialog.done(QDialog.Rejected)
+
+
+def click(widget):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    QTest.mouseClick(widget, Qt.LeftButton, Qt.NoModifier, widget.rect().center())
+    QApplication.processEvents()
+
+
+def test_navigation_clicks_filter_the_list(app, monkeypatch):
+    """Clicking Favorites / Weak / a category in the navigation filters the entries.
+
+    The navigation items emit clicked(bool); the bool used to replace the view
+    name bound in the lambda, so every entry showed all passwords. Calling
+    change_view() directly (as the older tests did) did not catch it.
+    """
+    create_account(app, monkeypatch)
+    pm, uid = app.password_manager, app.auth_manager.get_current_user_id()
+    categories = app.db.fetch_all("SELECT * FROM categories WHERE user_id = ? ORDER BY sort_order", (uid,))
+    fav = pm.add_password(uid, "Strong favourite", "a", "Xk9#mPq2$vLw8!zR",
+                          category_id=categories[1]['category_id'])
+    pm.toggle_favorite(fav, uid)
+    pm.add_password(uid, "Weak one", "b", "1234")
+    pm.add_password(uid, "Medium one", "c", "hello123World")
+    window = app.main_window
+    window.refresh_data()
+
+    def titles():
+        return sorted(window.entry_title(row) for row in range(window.entry_list.count()))
+
+    assert titles() == ["Medium one", "Strong favourite", "Weak one"]
+
+    click(window.nav_items["view-favorites"])
+    assert window.current_view == "favorites"
+    assert titles() == ["Strong favourite"]
+
+    click(window.nav_items["view-weak"])
+    assert window.current_view == "weak"
+    assert titles() == ["Weak one"]
+
+    click(window.category_items[categories[1]['category_id']])
+    assert window.current_category == categories[1]['category_id']
+    assert titles() == ["Strong favourite"]
+
+    click(window.nav_items["view-all"])
+    assert window.current_view == "all" and window.current_category is None
+    assert len(titles()) == 3
+
+
+def test_change_password_from_security_check_reports_success(app, monkeypatch, messages):
+    """The new password is saved and no "Failed to change password" is shown.
+
+    The confirmation tooltip used to pass msecShowTime as a keyword, which PyQt5
+    rejects: the password was already saved, but the user saw an error.
+    """
+    from ui.add_password_dialog import AddPasswordDialog
+    from ui.breach_dialog import BreachDialog
+
+    create_account(app, monkeypatch)
+    uid = app.auth_manager.get_current_user_id()
+    pid = app.password_manager.add_password(uid, "Mail", "mum", "1234")
+
+    def edit_and_save(dialog):
+        dialog.password_input.setText("Brand-New-Pass-42!")
+        dialog.save_password()
+        return dialog.result()
+    monkeypatch.setattr(AddPasswordDialog, "exec_", edit_and_save)
+
+    dialog = BreachDialog(app.password_manager, uid)  # keeps the page alive
+    page = dialog.page
+    changed = []
+    page.entries_changed.connect(lambda: changed.append(True))
+    page.change_password(pid)
+
+    assert app.password_manager.get_password(pid, uid).password == "Brand-New-Pass-42!"
+    assert changed == [True]
+    assert [m for m in messages if m[0] == "critical"] == []
+
+
+def test_change_password_cancelled_changes_nothing(app, monkeypatch, messages):
+    from ui.add_password_dialog import AddPasswordDialog
+    from ui.breach_dialog import BreachDialog
+
+    create_account(app, monkeypatch)
+    uid = app.auth_manager.get_current_user_id()
+    pid = app.password_manager.add_password(uid, "Mail", "mum", "1234")
+    monkeypatch.setattr(AddPasswordDialog, "exec_", lambda dialog: QDialog.Rejected)
+
+    dialog = BreachDialog(app.password_manager, uid)  # keeps the page alive
+    page = dialog.page
+    changed = []
+    page.entries_changed.connect(lambda: changed.append(True))
+    page.change_password(pid)
+
+    assert app.password_manager.get_password(pid, uid).password == "1234"
+    assert changed == []
+    assert [m for m in messages if m[0] == "critical"] == []
+
+
+def test_status_note_tooltip_does_not_raise(app, monkeypatch):
+    from ui.breach_dialog import BreachDialog
+
+    create_account(app, monkeypatch)
+    dialog = BreachDialog(app.password_manager, app.auth_manager.get_current_user_id())
+    page = dialog.page
+    page.status_note("Password updated")  # used to raise TypeError (msecShowTime keyword)

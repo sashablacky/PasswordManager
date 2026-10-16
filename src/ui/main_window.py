@@ -218,7 +218,9 @@ class MainWindow(FluentWindow):
         ]
         for view_id, icon, text in views:
             item = NavItem(icon, text)
-            nav.addWidget(f"view-{view_id}", item, lambda v=view_id: self.change_view(v))
+            # Navigation items emit clicked(bool): without the first parameter the bool
+            # would replace view_id and every entry showed all passwords
+            nav.addWidget(f"view-{view_id}", item, lambda checked=False, v=view_id: self.change_view(v))
             self.nav_items[f"view-{view_id}"] = item
 
         nav.addWidget("header-categories", NavHeader("Categories"), position=NavigationItemPosition.SCROLL)
@@ -343,7 +345,7 @@ class MainWindow(FluentWindow):
             if item is None:
                 item = NavItem(None, cat['name'], dot=theme.category_color(cat.get('color')))
                 self.navigationInterface.addWidget(
-                    key, item, lambda cid=cat['category_id']: self.on_category_selected(cid),
+                    key, item, lambda checked=False, cid=cat['category_id']: self.on_category_selected(cid),
                     NavigationItemPosition.SCROLL)
                 self.category_items[cat['category_id']] = item
             else:
