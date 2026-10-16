@@ -63,7 +63,12 @@ jobs:
       - name: Tests (offscreen, without the Fluent window tests)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q tests
+        run: |
+          set -o pipefail
+          if ! python -m pytest -q -rfE --tb=short -p no:cacheprovider tests 2>&1 | tee pytest-offscreen.log; then
+            python .github/scripts/annotate_failure.py "Offscreen tests failed" < pytest-offscreen.log
+            exit 1
+          fi
 
       # On failure the end of the log (with the faulthandler traceback of a crash)
       # is also shown as an annotation of the run, readable without the raw logs
