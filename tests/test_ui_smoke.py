@@ -285,6 +285,23 @@ def test_windows_fit_small_screen(app, monkeypatch, dialog_name):
     from ui.add_password_dialog import AddPasswordDialog
     from ui.password_generator_dialog import PasswordGeneratorDialog
     from ui.breach_dialog import BreachDialog
+    from PyQt5.QtCore import QRect
+
+    # 1366x768 laptop screen minus the taskbar, whatever screen the tests run on
+    # (offscreen is 800x600, a macOS CI runner has a large real display)
+    class LaptopScreen:
+        def __init__(self, screen):
+            self._screen = screen
+
+        def availableGeometry(self):
+            return QRect(0, 0, 1366, 728)
+
+        def __getattr__(self, name):
+            return getattr(self._screen, name)
+
+    real_primary_screen = QApplication.primaryScreen
+    monkeypatch.setattr(QApplication, "primaryScreen",
+                        staticmethod(lambda: LaptopScreen(real_primary_screen())))
 
     if dialog_name == "login":
         widget = app.login_widget
