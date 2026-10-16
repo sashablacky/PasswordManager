@@ -104,10 +104,10 @@ jobs:
           hdiutil attach -nobrowse -readonly -mountpoint /tmp/pmdmg "$DMG"
           ls -la /tmp/pmdmg
           test -f "/tmp/pmdmg/Как открыть в первый раз.rtf"
-          if [ -f /tmp/pmdmg/.DS_Store ] && [ -d /tmp/pmdmg/.background ]; then
+          if [ -f /tmp/pmdmg/.DS_Store ] && ls -a /tmp/pmdmg | grep -q "^.background"; then
             echo "Window layout and background present"
           else
-            echo "::warning title=dmg layout::no background/layout (dmgbuild fallback was used)"
+            echo "::warning title=dmg layout::no window layout or background in the .dmg"
           fi
           codesign --verify --deep --strict --verbose=2 "/tmp/pmdmg/Password Manager.app"
           # The signature must name the bundle and seal its Info.plist, or macOS may
