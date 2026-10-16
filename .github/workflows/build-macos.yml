@@ -48,12 +48,13 @@ jobs:
           python -c "import platform, PyQt5.QtCore as q; print(platform.machine(), 'Qt', q.QT_VERSION_STR)"
 
       # The Fluent window frame calls into the native Cocoa window, which the
-      # offscreen Qt platform does not have, so the tests run on the runner's
-      # real window system. The platform-independent tests also run offscreen.
+      # offscreen Qt platform does not have, so all tests run on the runner's
+      # real window system. The offscreen run covers the rest (the window tests
+      # skip themselves there).
       - name: Tests (offscreen, without the Fluent window tests)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q tests --ignore=tests/test_ui_smoke.py --ignore=tests/test_theme_settings.py
+        run: python -m pytest -q tests
 
       # On failure the end of the log (with the faulthandler traceback of a crash)
       # is also shown as an annotation of the run, readable without the raw logs

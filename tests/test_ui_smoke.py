@@ -4,10 +4,18 @@ Message boxes are replaced with stubs so no dialog blocks the test.
 """
 
 import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+import sys
 
 import pytest
+
+# Headless on Windows and Linux. Not on macOS: there the Fluent window frame
+# talks to the native Cocoa window, which the offscreen platform does not have
+# (the process crashes), so these tests need the real window system.
+if sys.platform != "darwin":
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+elif os.environ.get("QT_QPA_PLATFORM", "cocoa") != "cocoa":
+    pytest.skip("Fluent windows need the native Cocoa platform on macOS", allow_module_level=True)
+
 from PyQt5.QtWidgets import QApplication, QMessageBox, QDialog, QInputDialog
 
 MASTER = "FirstPass11!"
