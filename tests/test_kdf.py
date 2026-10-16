@@ -346,8 +346,11 @@ class TestPerformance:
         kdf.derive_key(password, salt)
         elapsed = time.time() - start
 
-        # Should take at least 50ms (prevents fast brute force)
-        assert elapsed > 0.05, f"Key derivation too fast: {elapsed * 1000:.0f}ms"
+        # Brute-force cost comes from the Argon2 parameters, not from how fast the
+        # machine running the tests is (a fast CI Mac did it in 45 ms)
+        assert kdf.MEMORY_COST >= 65536 and kdf.TIME_COST >= 3
+        # Sanity check only: filling 64 MiB three times cannot take under 10 ms
+        assert elapsed > 0.01, f"Key derivation too fast: {elapsed * 1000:.0f}ms"
 
     def test_estimate_derivation_time(self, kdf):
         """Test derivation time estimation"""

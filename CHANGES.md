@@ -210,7 +210,7 @@ python -m pytest tests
 
 В GitHub Actions на `macos-14` (arm64) и `macos-15-intel` (x86_64) зелёные оба прогона тестов (offscreen и на настоящем Cocoa, включая тест меток секрета в буфере обмена), сборка `.app` и `.dmg`, проверка подписи и пробный запуск приложения.
 
-# Версия 1.5.1: исправления с Mac и страница релизов
+# Версия 1.5.2: исправления с Mac и страница релизов
 
 ## Исправления
 
@@ -219,11 +219,13 @@ python -m pytest tests
 
 ## Релизы на GitHub
 
-- Тег вида `v1.5.1` запускает тот же workflow **Build macOS app**: обе сборки `.dmg` и затем GitHub Release с ними (встроенный `GITHUB_TOKEN`, бесплатно). Скачать можно без входа в GitHub: https://github.com/sashablacky/PasswordManager/releases/latest
+- Тег вида `v1.5.2` запускает тот же workflow **Build macOS app**: обе сборки `.dmg` и затем GitHub Release с ними (встроенный `GITHUB_TOKEN`, бесплатно). Скачать можно без входа в GitHub: https://github.com/sashablacky/PasswordManager/releases/latest
 - Файлы называются `PasswordManager-<версия>-macOS-AppleSilicon.dmg` и `…-macOS-Intel.dmg`.
 - Описание релиза: «что нового» из `docs/releases/v<версия>.md` и общий блок «какой файл выбрать» из `docs/releases/download-help.md`. Тег должен совпадать с `src/version.py`, иначе релиз не создаётся.
 - `docs/macos-install.md` и README ведут на страницу релизов вместо Artifacts в Actions.
 
 ## Тесты
 
-`python -m pytest` (`QT_QPA_PLATFORM=offscreen`): **318 passed, 1 skipped** (пропущен тест буфера обмена, который идёт только на настоящем Mac).
+Первый релизный тег `v1.5.1` остался без релиза: его сборка упала на тесте `test_derivation_slow_enough`, который требовал, чтобы Argon2 работал дольше 50 мс, а быстрый Intel-раннер справился за 45 мс. Стойкость к перебору задают параметры Argon2 (64 МБ, 3 прохода), а не скорость машины, поэтому тест теперь проверяет параметры, а по времени — только грубую нижнюю границу 10 мс. Первый релиз — `v1.5.2`: в него вошли и изменения 1.5 (разблокировка из браузера, выбор времени автоблокировки).
+
+`python -m pytest` (`QT_QPA_PLATFORM=offscreen`): **327 passed, 1 skipped** (пропущен тест буфера обмена, который идёт только на настоящем Mac).
