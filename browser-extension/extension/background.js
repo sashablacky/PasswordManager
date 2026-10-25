@@ -355,3 +355,25 @@ api.runtime.onMessage.addListener((message, sender) => {
 api.commands.onCommand.addListener((command) => {
   if (command === "fill-login") fillFirstLogin();
 });
+
+// ------------------------------------------------------------ the browser's own password manager
+
+// Firefox's password manager would offer to save and fill the same logins on
+// top of ours. Turned off while the extension is installed and enabled; the
+// browser restores the user's setting when it is disabled or removed.
+// Safari has no privacy API.
+async function turnOffBrowserPasswordSaving() {
+  const setting = api.privacy && api.privacy.services && api.privacy.services.passwordSavingEnabled;
+  if (!setting) return;
+  try {
+    const current = await setting.get({});
+    if (current.value && current.levelOfControl === "controllable_by_this_extension") {
+      await setting.set({ value: false });
+    }
+  } catch (e) {
+    console.warn("SecureVault: could not turn off the browser's password saving", e);
+  }
+}
+
+if (api.runtime.onInstalled) api.runtime.onInstalled.addListener(turnOffBrowserPasswordSaving);
+if (api.runtime.onStartup) api.runtime.onStartup.addListener(turnOffBrowserPasswordSaving);
