@@ -8,7 +8,7 @@ name: Diagnose macOS release
 
 on:
   push:
-    branches: [main]
+    branches: [macos-stable]
     paths:
       - .github/workflows/diagnose-macos.yml
   workflow_dispatch:
