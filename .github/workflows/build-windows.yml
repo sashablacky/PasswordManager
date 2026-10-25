@@ -119,8 +119,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-ChildItem dist/*.exe
 
-      # Silent install for the current user, start, uninstall: the program goes,
-      # the user's data in %APPDATA%\SecureVault stays
+      # Silent install for the current user, start, uninstall: the program and
+      # its Firefox host registration go, the user's data in %APPDATA%\SecureVault stays
       - name: Check the installer
         shell: pwsh
         run: |
@@ -131,6 +131,8 @@ jobs:
           if (-not (Test-Path $exe)) { Write-Output "::error title=Installer::$exe was not installed"; exit 1 }
           $shortcut = Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/Password Manager.lnk"
           if (-not (Test-Path $shortcut)) { Write-Output "::error title=Installer::no Start menu shortcut"; exit 1 }
+          python .github/scripts/check_native_host.py $dir
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           $p = Start-Process $exe -PassThru
           Start-Sleep -Seconds 20
           if ($p.HasExited) { Write-Output "::error title=Installer::the installed program exited"; exit 1 }
@@ -142,6 +144,8 @@ jobs:
           Start-Sleep -Seconds 3
           if (Test-Path $exe) { Write-Output "::error title=Installer::the uninstaller left the program"; exit 1 }
           if (-not (Test-Path $vault)) { Write-Output "::error title=Installer::the uninstaller deleted the user's vault"; exit 1 }
+          python .github/scripts/check_native_host.py $dir --removed
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Output "Installed, started, uninstalled; the vault was kept"
 
       - uses: actions/upload-artifact@v7

@@ -1,8 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
 # PyInstaller spec for the Windows build: "dist/Password Manager/Password Manager.exe"
-# (one folder, no console window). The GitHub Actions workflow
-# .github/workflows/build-macos.yml packs it into an installer (installer.iss)
+# (one folder, no console window), and next to it securevault_host.exe, the
+# native messaging host of the Firefox extension (browser-extension/native-host),
+# which the installer registers with Firefox. The GitHub Actions workflow
+# .github/workflows/build-windows.yml packs it into an installer (installer.iss)
 # and a portable .zip. Build by hand from the project folder:
 #     pip install -r requirements.txt -r packaging/windows/requirements-build.txt
 #     pyinstaller --noconfirm --clean packaging/windows/PasswordManager.spec
@@ -76,10 +78,36 @@ exe = EXE(
     version=VERSION_FILE,
 )
 
+# Firefox starts this with the extension's messages on stdin, so it is a
+# console program (Firefox gives it no window). Standard library only.
+host = Analysis(
+    [os.path.join(ROOT, "browser-extension", "native-host", "securevault_host.py")],
+    excludes=["tkinter", "PyQt5", "numpy", "scipy", "pytest", "unittest", "pydoc", "email", "http",
+              "xml", "sqlite3", "ssl", "asyncio"],
+    noarchive=False,
+)
+
+host_exe = EXE(
+    PYZ(host.pure),
+    host.scripts,
+    [],
+    exclude_binaries=True,
+    name="securevault_host",
+    debug=False,
+    strip=False,
+    upx=False,
+    console=True,
+    icon=os.path.join(SPECPATH, "SecureVault.ico"),
+    version=VERSION_FILE,
+)
+
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
+    host_exe,
+    host.binaries,
+    host.datas,
     strip=False,
     upx=False,
     name=APP_NAME,

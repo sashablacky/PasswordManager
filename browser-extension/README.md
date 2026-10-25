@@ -20,12 +20,14 @@
 ## Firefox (Windows и macOS)
 
 1. Запустите программу SecureVault и разблокируйте её.
-2. Один раз зарегистрируйте посредника той же Python, на которой работает программа:
-   ```
-   .venv\Scripts\python browser-extension\install_firefox.py        (Windows)
-   .venv/bin/python browser-extension/install_firefox.py            (macOS)
-   ```
-   Удалить: тот же скрипт с `--remove`.
+2. Зарегистрируйте посредника:
+   * **Windows, программа из установщика** `Setup.exe`: ничего делать не нужно. Установщик кладёт рядом с программой `securevault_host.exe` и регистрирует его в Firefox, а при удалении программы убирает регистрацию.
+   * **Portable-версия, запуск из исходников и macOS:** один раз запустите скрипт той же Python, на которой работает программа:
+     ```
+     .venv\Scripts\python browser-extension\install_firefox.py        (Windows)
+     .venv/bin/python browser-extension/install_firefox.py            (macOS)
+     ```
+     Удалить: тот же скрипт с `--remove`. На Windows запускайте его из обычного PowerShell, а не из приложения, установленного из Microsoft Store или как MSIX-пакет: такому приложению Windows подсовывает собственную копию реестра, и Firefox регистрацию не увидит.
 3. Установите расширение:
    * для проверки: `about:debugging` → «Этот Firefox» → «Загрузить временное дополнение» → `extension/manifest.json`. Работает до перезапуска Firefox;
    * насовсем: обычный Firefox ставит только подписанные расширения. Подписать бесплатно можно на addons.mozilla.org как «unlisted» (без публикации в каталоге): `npx web-ext sign --channel=unlisted --source-dir extension --api-key … --api-secret …`. Получится `.xpi`, который ставится в любой Firefox.
