@@ -67,14 +67,18 @@ for (const file of ["crypto.js", "background.js"]) {
   vm.runInContext(fs.readFileSync(path.join(EXT, file), "utf8"), context, { filename: file });
 }
 
-const fromPopup = (message) => listeners[0](message, {});
+// Senders as Firefox describes them: the popup has no tab, the pairing page is
+// an extension page in a tab, content scripts report the web page
+const fromPopup = (message) => listeners[0](message, { url: browser.runtime.getURL("popup.html") });
+const fromPairPage = (message) => listeners[0](message, { tab: { id: 9 }, frameId: 0,
+                                                          url: browser.runtime.getURL("pair.html") });
 const fromPage = (message, url = tabUrl) => listeners[0](message, { tab: { id: 7 }, frameId: 0, url });
 
 async function main() {
   const r = {};
   r.statusBefore = (await fromPopup({ type: "status" })).state;
-  r.pairStart = await fromPopup({ type: "pair_start" });
-  r.pairPoll = (await fromPopup({ type: "pair_poll" })).state;
+  r.pairStart = await fromPairPage({ type: "pair_start" });
+  r.pairPoll = (await fromPairPage({ type: "pair_poll" })).state;
   r.status = await fromPopup({ type: "status" });
 
   r.fill = await fromPopup({ type: "fill", id: r.status.logins[0].id });

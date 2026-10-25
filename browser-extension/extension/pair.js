@@ -32,7 +32,7 @@ const ERRORS = {
 };
 
 async function poll() {
-  const result = await api.runtime.sendMessage({ type: "pair_poll" }).catch(() => ({ state: "error" }));
+  const result = await api.runtime.sendMessage({ type: "pair_poll" }).catch(() => null) || { state: "error" };
   if (result.state === "pending") {
     setTimeout(poll, 1000);
     return;
@@ -48,7 +48,7 @@ async function poll() {
 async function start() {
   document.title = t("pairTitle");
   show(el("p", "muted", t("popupLoading")));
-  const result = await api.runtime.sendMessage({ type: "pair_start" }).catch(() => ({ error: "internal" }));
+  const result = await api.runtime.sendMessage({ type: "pair_start" }).catch(() => null) || { error: "internal" };
   if (result.error) {
     failed(ERRORS[result.error] || "pairExpired");
     return;

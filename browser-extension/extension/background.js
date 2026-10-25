@@ -306,7 +306,9 @@ async function popupStatus() {
 
 api.runtime.onMessage.addListener((message, sender) => {
   if (!message || typeof message.type !== "string") return undefined;
-  const fromPage = !!sender.tab;
+  // Content scripts report the web page as their URL. The pairing page is our
+  // own page but lives in a tab, so sender.tab alone does not tell them apart.
+  const fromPage = !(sender.url || "").startsWith(api.runtime.getURL(""));
 
   // From content scripts
   if (fromPage) {

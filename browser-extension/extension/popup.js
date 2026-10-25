@@ -20,7 +20,7 @@ function show(...nodes) {
 }
 
 function send(message) {
-  return api.runtime.sendMessage(message).catch(() => ({ error: "internal" }));
+  return api.runtime.sendMessage(message).then((r) => r || { error: "internal" }, () => ({ error: "internal" }));
 }
 
 function message(titleKey, textKey, ...extra) {
