@@ -12,7 +12,7 @@
 | **Apple M1, M2, M3, M4…** | `PasswordManager-…-macOS-AppleSilicon.dmg` |
 | **Intel** | `PasswordManager-…-macOS-Intel.dmg` |
 
-Скачать: откройте страницу https://github.com/sashablacky/PasswordManager/releases/latest, внизу в разделе **Assets** нажмите на нужный файл. Входить в GitHub не нужно. Файл окажется в папке «Загрузки».
+Скачать: откройте страницу https://github.com/sashablacky/PasswordManager/releases/tag/v1.5.5, внизу в разделе **Assets** нажмите на нужный файл. Входить в GitHub не нужно. Файл окажется в папке «Загрузки».
 
 ## 2. Установка
 
@@ -62,7 +62,7 @@
 #### Способ 1. Обычная установка, запуск только из «Программ»
 
 1. Сделайте «Начать заново», если до этого были неудачные попытки.
-2. Откройте https://github.com/sashablacky/PasswordManager/releases/latest, внизу в разделе **Assets** нажмите на файл `…-macOS-Intel.dmg` (для Mac с процессором Intel) или `…-macOS-AppleSilicon.dmg` (для M1–M4). Файл появится в **Загрузках**.
+2. Откройте https://github.com/sashablacky/PasswordManager/releases/tag/v1.5.5, внизу в разделе **Assets** нажмите на файл `…-macOS-Intel.dmg` (для Mac с процессором Intel) или `…-macOS-AppleSilicon.dmg` (для M1–M4). Файл появится в **Загрузках**.
 3. Дважды щёлкните по нему. Откроется окно со стрелкой.
 4. Перетащите **замок (Password Manager)** на папку **Applications**. Если спросит «Заменить?» — **Заменить**.
 5. Закройте окно и **извлеките диск** (⏏ в Finder слева).

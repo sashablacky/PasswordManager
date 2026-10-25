@@ -1,13 +1,15 @@
-name: Build apps
+name: Build Windows app
 
-# Builds the program for macOS ("Password Manager.app" in a .dmg, for Apple
-# Silicon and Intel Macs) and for Windows (an installer and a portable .zip),
-# and keeps them as downloadable artifacts of the run (Actions tab -> the run
-# -> Artifacts). Runs on every push to main and by hand.
+# Builds the program for Windows (an installer and a portable .zip) and keeps
+# them as downloadable artifacts of the run (Actions tab -> the run ->
+# Artifacts). Runs on every push to main and by hand.
 #
-# A pushed version tag (v1.5.5, ...) also publishes a GitHub Release with all
-# the files, downloadable without a GitHub account:
-#     git tag v1.5.5 && git push origin v1.5.5
+# The macOS version is frozen on the macos-stable branch (cut from v1.5.5),
+# which has its own workflow; main builds no .dmg.
+#
+# A pushed version tag (v1.6.0, ...) also publishes a GitHub Release with the
+# files, downloadable without a GitHub account:
+#     git tag v1.6.0 && git push origin v1.6.0
 # The tag must match src/version.py. "What's new" for the release page is read
 # from docs/releases/<tag>.md if that file exists.
 
@@ -21,134 +23,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-macos-${{ github.ref }}
+  group: build-windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: macOS ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14          # Apple Silicon (M1 and later)
-            arch: arm64
-            kind: AppleSilicon
-          - runner: macos-15-intel    # Intel Macs
-            arch: x86_64
-            kind: Intel
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            packaging/macos/requirements-build.txt
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r packaging/macos/requirements-build.txt
-          python -c "import platform, PyQt5.QtCore as q; print(platform.machine(), 'Qt', q.QT_VERSION_STR)"
-
-      # The Fluent window frame calls into the native Cocoa window, which the
-      # offscreen Qt platform does not have, so all tests run on the runner's
-      # real window system. The offscreen run covers the rest (the window tests
-      # skip themselves there).
-      - name: Tests (offscreen, without the Fluent window tests)
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          set -o pipefail
-          if ! python -m pytest -q -rfE --tb=short -p no:cacheprovider tests 2>&1 | tee pytest-offscreen.log; then
-            python .github/scripts/annotate_failure.py "Offscreen tests failed" < pytest-offscreen.log
-            exit 1
-          fi
-
-      # On failure the end of the log (with the faulthandler traceback of a crash)
-      # is also shown as an annotation of the run, readable without the raw logs
-      - name: Tests (all, native window system)
-        run: |
-          set -o pipefail
-          if ! python -X faulthandler -m pytest -v -rfE --tb=short -p no:cacheprovider tests 2>&1 | tee pytest-native.log; then
-            python .github/scripts/annotate_failure.py "Native tests failed" < pytest-native.log
-            exit 1
-          fi
-
-      - name: Build app and dmg
-        run: |
-          set -o pipefail
-          if ! ./packaging/macos/build_macos.sh --skip-install --skip-tests 2>&1 | tee build.log; then
-            python .github/scripts/annotate_failure.py "Build failed" < build.log
-            exit 1
-          fi
-
-      - name: Check the bundle
-        run: |
-          APP="dist/Password Manager.app"
-          plutil -p "$APP/Contents/Info.plist"
-          # Info.plist, bundle id, and no library that needs a newer macOS than the plist says
-          python .github/scripts/check_macos_bundle.py "$APP"
-
-      # What the user gets: the app inside the .dmg, copied out like in Finder,
-      # started through Launch Services. The process must still be alive after 20 s.
-      - name: Check the app from the .dmg
-        run: |
-          set -o pipefail
-          DMG=$(ls dist/*.dmg)
-          hdiutil attach -nobrowse -readonly -mountpoint /tmp/pmdmg "$DMG"
-          ls -la /tmp/pmdmg
-          test -f "/tmp/pmdmg/Как открыть в первый раз.rtf"
-          if [ -f /tmp/pmdmg/.DS_Store ] && ls -a /tmp/pmdmg | grep -q "^.background"; then
-            echo "Window layout and background present"
-          else
-            echo "::warning title=dmg layout::no window layout or background in the .dmg"
-          fi
-          codesign --verify --deep --strict --verbose=2 "/tmp/pmdmg/Password Manager.app"
-          # The signature must name the bundle and seal its Info.plist, or macOS may
-          # not keep the "Open Anyway" approval for it
-          SIG=$(codesign -dvvv "/tmp/pmdmg/Password Manager.app" 2>&1)
-          echo "$SIG"
-          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw "/tmp/pmdmg/Password Manager.app/Contents/Info.plist")
-          echo "$SIG" | grep -qx "Identifier=$BUNDLE_ID" || { echo "::error::signature identifier is not $BUNDLE_ID"; exit 1; }
-          echo "$SIG" | grep -q "^Info.plist entries=" || { echo "::error::Info.plist is not bound to the signature"; exit 1; }
-          mkdir -p "$HOME/Applications"
-          rm -rf "$HOME/Applications/Password Manager.app"
-          ditto "/tmp/pmdmg/Password Manager.app" "$HOME/Applications/Password Manager.app"
-          hdiutil detach /tmp/pmdmg
-          APP="$HOME/Applications/Password Manager.app"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          # Ad hoc signed, so Gatekeeper is expected to reject it; printed for the record
-          spctl -a -vv -t exec "$APP" || true
-          rm -f "$HOME/Library/Application Support/SecureVault/error.log"
-          open "$APP"
-          sleep 20
-          if ! pgrep -f "Password Manager.app/Contents/MacOS" >/dev/null; then
-            echo "::error title=App from the .dmg::not running 20 s after start"
-            cat "$HOME/Library/Application Support/SecureVault/error.log" || true
-            ls -la "$HOME/Library/Logs/DiagnosticReports" || true
-            exit 1
-          fi
-          pkill -f "Password Manager.app/Contents/MacOS"
-          if grep -q "could not start" "$HOME/Library/Application Support/SecureVault/error.log" 2>/dev/null; then
-            echo "::error title=App from the .dmg::start-up error in error.log"
-            cat "$HOME/Library/Application Support/SecureVault/error.log"
-            exit 1
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: PasswordManager-macOS-${{ matrix.kind }}
-          path: dist/*.dmg
-          if-no-files-found: error
-          retention-days: 30
-
   build-windows:
     name: Windows
     runs-on: windows-latest
@@ -278,7 +156,7 @@ jobs:
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, build-windows]
+    needs: [build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -302,8 +180,6 @@ jobs:
             exit 1
           fi
           ls -l dist
-          test -f "dist/PasswordManager-$VERSION-macOS-AppleSilicon.dmg"
-          test -f "dist/PasswordManager-$VERSION-macOS-Intel.dmg"
           test -f "dist/PasswordManager-$VERSION-Windows-Setup.exe"
           test -f "dist/PasswordManager-$VERSION-Windows-Portable.zip"
 
@@ -315,7 +191,7 @@ jobs:
             sed "s/{VERSION}/$VERSION/g" docs/releases/download-help.md
           } > release-notes.md
 
-          gh release create "$TAG" dist/*.dmg dist/*.exe dist/*.zip \
+          gh release create "$TAG" dist/*.exe dist/*.zip \
             --title "Password Manager $VERSION" \
             --notes-file release-notes.md \
             --verify-tag

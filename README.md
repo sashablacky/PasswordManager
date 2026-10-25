@@ -40,7 +40,9 @@ https://github.com/sashablacky/PasswordManager/releases/latest —
   settings and log in `%APPDATA%\SecureVault`.
 - The program is not code-signed, so SmartScreen may show "Windows protected your
   PC": **More info** → **Run anyway**.
-- Built by the same GitHub Actions workflow as the Mac app (job `build-windows`):
+- Built by the GitHub Actions workflow **Build Windows app**
+  (`.github/workflows/build-windows.yml`, on every push to `main`; a `v<version>`
+  tag publishes the release):
   tests, PyInstaller (`packaging/windows/PasswordManager.spec`, version details in
   the .exe properties, icon `packaging/windows/SecureVault.ico` from
   `make_ico.py`), a 20-second start on the runner's desktop with an empty
@@ -55,22 +57,19 @@ Installing on a Mac without a terminal (in Russian): [`docs/macos-install.md`](d
 
 ### Getting the app
 
-Download the latest `.dmg` from the Releases page (no GitHub account needed):
-https://github.com/sashablacky/PasswordManager/releases/latest —
+The Mac version is frozen at v1.5.5 on the `macos-stable` branch until it works
+on Intel Macs; `main` is developed for Windows only and builds no `.dmg`.
+Download: https://github.com/sashablacky/PasswordManager/releases/tag/v1.5.5 —
 `...-macOS-AppleSilicon.dmg` for M1 and later, `...-macOS-Intel.dmg` for Intel Macs.
 
-Every push to `main` runs the GitHub Actions workflow **Build macOS app**
-(`.github/workflows/build-macos.yml`; it can also be started by hand from the
-Actions tab). It runs the tests on macOS and builds `Password Manager.app` for
-Apple Silicon (`macos-14`) and Intel (`macos-15-intel`), packed in a `.dmg`,
-kept under **Artifacts** of the run for 30 days (GitHub sign-in needed).
-
-To publish a release: set the version in `src/version.py`, describe the changes
-in Russian in `docs/releases/v<version>.md`, commit, then
-`git tag v<version> && git push origin v<version>`. The same workflow builds
-both `.dmg` files and creates the GitHub Release with them; the page also gets
-`docs/releases/download-help.md` (which file to pick). The tag must match
-`src/version.py`, otherwise the release step fails.
+The workflow **Build macOS app** (`.github/workflows/build-macos.yml` on
+`macos-stable`) runs on every push to that branch: tests on macOS, then
+`Password Manager.app` for Apple Silicon (`macos-14`) and Intel (`macos-15-intel`)
+in a `.dmg`, kept under **Artifacts** of the run for 30 days. A Mac fix is
+committed to `macos-stable` with a new version in `src/version.py`, then
+`git tag mac-v<version> && git push origin mac-v<version>` publishes a release
+with both `.dmg` files that is not marked "latest" (that is the Windows one);
+update the link in `docs/macos-install.md` to the new release.
 
 To build on a Mac by hand: `./packaging/macos/build_macos.sh`
 (needs Python 3.12; result in `dist/`). The recipe is
