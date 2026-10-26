@@ -157,10 +157,75 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # The Firefox extension as an .xpi with the program's version. Ordinary Firefox
+  # installs only extensions signed by Mozilla: for a version tag it is signed on
+  # addons.mozilla.org as "unlisted" (not published in the catalogue) and goes into
+  # the release. That needs the repository secrets AMO_JWT_ISSUER and AMO_JWT_SECRET
+  # (https://addons.mozilla.org/developers/addon/api/key/); without them, and on
+  # other runs, only an unsigned .xpi is kept as an artifact, for Firefox Developer
+  # Edition with xpinstall.signatures.required = false.
+  firefox-extension:
+    name: Firefox extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Lint
+        run: |
+          VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/version.py)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p build
+          cp -r browser-extension/extension build/firefox-extension
+          node -e '
+            const fs = require("fs"), p = "build/firefox-extension/manifest.json";
+            const m = JSON.parse(fs.readFileSync(p, "utf8"));
+            m.version = process.env.VERSION;
+            fs.writeFileSync(p, JSON.stringify(m, null, 2));'
+          npx --yes web-ext@8 lint --source-dir build/firefox-extension --warnings-as-errors
+
+      - name: Unsigned .xpi
+        run: |
+          npx --yes web-ext@8 build --source-dir build/firefox-extension --artifacts-dir build/xpi --overwrite-dest
+          mkdir -p dist
+          mv build/xpi/*.zip "dist/SecureVault-$VERSION-Firefox-unsigned.xpi"
+
+      - name: Signed .xpi
+        if: startsWith(github.ref, 'refs/tags/v') && env.AMO_JWT_ISSUER != '' && env.AMO_JWT_SECRET != ''
+        run: |
+          npx --yes web-ext@8 sign --channel=unlisted --source-dir build/firefox-extension \
+            --artifacts-dir build/signed --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
+          mv build/signed/*.xpi "dist/PasswordManager-$VERSION-Firefox.xpi"
+
+      - name: No signing key
+        if: startsWith(github.ref, 'refs/tags/v') && (env.AMO_JWT_ISSUER == '' || env.AMO_JWT_SECRET == '')
+        run: echo "::warning title=Firefox extension::AMO_JWT_ISSUER/AMO_JWT_SECRET are not set, the release gets no signed .xpi"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Firefox-extension-unsigned
+          path: dist/*-unsigned.xpi
+          retention-days: 30
+
+      # Named like the program's artifacts, so the release picks it up
+      - uses: actions/upload-artifact@v7
+        with:
+          name: PasswordManager-Firefox
+          path: dist/PasswordManager-*-Firefox.xpi
+          if-no-files-found: ignore
+          retention-days: 30
+
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-windows]
+    needs: [build-windows, firefox-extension]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -195,7 +260,7 @@ jobs:
             sed "s/{VERSION}/$VERSION/g" docs/releases/download-help.md
           } > release-notes.md
 
-          gh release create "$TAG" dist/*.exe dist/*.zip \
+          gh release create "$TAG" dist/*.exe dist/*.zip $(ls dist/*.xpi 2>/dev/null) \
             --title "Password Manager $VERSION" \
             --notes-file release-notes.md \
             --verify-tag
