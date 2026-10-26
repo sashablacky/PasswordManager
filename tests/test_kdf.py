@@ -357,7 +357,9 @@ class TestPerformance:
         avg_time = kdf.estimate_derivation_time(iterations=3)
 
         assert isinstance(avg_time, float)
-        assert 0.05 < avg_time < 2.0  # Between 50ms and 2s
+        # Same lower bound as test_derivation_slow_enough: fast CI runners
+        # derive in about 45 ms
+        assert 0.01 < avg_time < 2.0
 
 
 class TestIntegration:
