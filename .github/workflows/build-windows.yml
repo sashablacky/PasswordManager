@@ -180,7 +180,7 @@ jobs:
 
       - name: Lint
         run: |
-          VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/version.py)"
+          export VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/version.py)"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           mkdir -p build
           cp -r browser-extension/extension build/firefox-extension
